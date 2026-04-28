@@ -14,14 +14,15 @@
 
 static const char *TAG = "MAIN";
 
+#define TOTAL_POINTS    47
 #define FRAME_HEADER_1  0xAA
 #define FRAME_HEADER_2  0x55
-#define FRAME_SIZE      76   // 2 + 72 + 2
+#define FRAME_SIZE      (2 + TOTAL_POINTS*2 + 1 + 2)   // header + data + checksum + \r\n
 
 static uint8_t rx_buf[128];
 static int rx_len = 0;
 
-uint16_t matrix_data[36];
+uint16_t matrix_data[TOTAL_POINTS];
 
 void uart_task(void *arg)
 {
@@ -46,8 +47,8 @@ void uart_task(void *arg)
                 {
                     uint8_t *frame = &rx_buf[i];
 
-                    // 解析36点
-                    for (int j = 0; j < 36; j++)
+                    // 解析 TOTAL_POINTS 点
+                    for (int j = 0; j < TOTAL_POINTS; j++)
                     {
                         uint8_t low  = frame[2 + j*2];
                         uint8_t high = frame[3 + j*2];
@@ -55,18 +56,16 @@ void uart_task(void *arg)
                     }
 
                     // 打印验证
-                    printf("Matrix:\n");
-                    for (int r = 0; r < 6; r++)
+                    printf("Matrix (%d pts):\n", TOTAL_POINTS);
+                    for (int j = 0; j < TOTAL_POINTS; j++)
                     {
-                        for (int c = 0; c < 6; c++)
-                        {
-                            printf("%4d ", matrix_data[r*6 + c]);
-                        }
-                        printf("\n");
+                        printf("%4d ", matrix_data[j]);
+                        if ((j + 1) % 11 == 0)
+                            printf("\n");
                     }
-                    printf("\n");
+                    printf("\n\n");
 
-                    // ⭐ ⭐ ⭐ 更新UI（核心！！）
+                    // 更新UI
                     lvgl_port_lock(0);
                     ui_matrix_update(matrix_data);
                     lvgl_port_unlock();
@@ -96,12 +95,9 @@ void app_main(void)
         return;
     }
 
-    ESP_LOGI(TAG, "UART TEST START\n");
+    ESP_LOGI(TAG, "UART START (47-point mode)\n");
 
-    // 用你uart.c里的初始化
-    uart_init_custom();   // 👈 用这个！ :contentReference[oaicite:1]{index=1}
+    uart_init_custom();
 
     xTaskCreate(uart_task, "uart_task", 4096, NULL, 5, NULL);
-
-
 }

@@ -8,14 +8,14 @@ extern "C" {
 #endif
 
 /**
- * @brief 创建6x6阵点UI（带手图背景）
+ * @brief 创建阵点UI（带手图背景），47点按物理布局映射
  */
 void ui_matrix_create(void);
 
 /**
- * @brief 更新36个阵点数据（通过颜色显示）
- * 
- * @param cap 36个点的数据数组
+ * @brief 更新47个阵点数据（通过颜色显示）
+ *
+ * @param cap 47个点的数据数组
  */
 void ui_matrix_update(uint16_t *cap);
 

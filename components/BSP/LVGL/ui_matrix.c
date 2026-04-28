@@ -1,23 +1,56 @@
 #include "lvgl.h"
 #include <stdio.h>
+#include <string.h>
 
-#define ROW 6
-#define COL 6
-#define POINT_NUM 36
+// ======================= 网格参数 =======================
+#define TOTAL_POINTS 47
+#define GRID_COLS    11
+#define GRID_ROWS    9
 
-static lv_obj_t *cells[POINT_NUM];
+// ======================= 通道 -> 网格位置映射表 =======================
+// 每个通道在视觉网格中的 (col, row) 位置
+// 拇指 col=0, 手掌 cols=1-9, 小指 col=10
+// 手指区 rows=0-2 (屏上方), 手掌区 rows=3-8 (屏下方)
 
+static const uint8_t ch_col[TOTAL_POINTS] = {
+     0,                                            // ch 0:  拇指 (pin 2)
+     1, 1, 1, 1, 1, 1,                            // ch 1-6:  手掌第1列 (pin 3-8, 上→下)
+     2, 2, 2, 2, 2, 2,                            // ch 7-12: 手掌第2列 (pin 9-14, 上→下)
+     3, 3, 3,                                      // ch 13-15: 食指 (pin 15-17, 下中上)
+     4, 4, 4, 4, 4, 4,                            // ch 16-21: 手掌第3列 (pin 18-23, 上→下)
+     5, 5, 5, 5, 5, 5,                            // ch 22-27: 手掌第4列 (pin 24-29, 下→上)
+     6, 6, 6,                                      // ch 28-30: 中指 (pin 30-32, 下中上)
+     7, 7, 7, 7, 7, 7,                            // ch 31-36: 手掌第5列 (pin 33-38, 下→上)
+     8, 8, 8,                                      // ch 37-39: 无名指 (pin 39-41, 下中上)
+     9, 9, 9, 9, 9, 9,                            // ch 40-45: 手掌第6列 (pin 42-47, 下→上)
+    10                                             // ch 46: 小指 (pin 48)
+};
+
+static const uint8_t ch_row[TOTAL_POINTS] = {
+     5,                                            // ch 0:  拇指 (手掌中段)
+     3, 4, 5, 6, 7, 8,                            // ch 1-6:  手掌第1列 上→下
+     3, 4, 5, 6, 7, 8,                            // ch 7-12: 手掌第2列 上→下
+     2, 1, 0,                                      // ch 13-15: 食指 下→中→上 (pin 15/16/17, 视觉从下到上)
+     3, 4, 5, 6, 7, 8,                            // ch 16-21: 手掌第3列 上→下
+     8, 7, 6, 5, 4, 3,                            // ch 22-27: 手掌第4列 下→上 (pin 24-29 下→上)
+     2, 1, 0,                                      // ch 28-30: 中指 下→中→上 (pin 30/31/32)
+     8, 7, 6, 5, 4, 3,                            // ch 31-36: 手掌第5列 下→上 (pin 33-38 下→上)
+     2, 1, 0,                                      // ch 37-39: 无名指 下→中→上 (pin 39/40/41)
+     8, 7, 6, 5, 4, 3,                            // ch 40-45: 手掌第6列 下→上 (pin 42-47 下→上)
+     0                                             // ch 46: 小指 (pin 48, 指尖)
+};
+
+static lv_obj_t *cells[TOTAL_POINTS];
+
+// ======================= 创建阵点UI =======================
 void ui_matrix_create(void)
 {
-    int screen_w = 320;
-    int screen_h = 240;
-
     // 背景白色
     lv_obj_t *screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_100, 0);
 
-    // ================== 手图 ==================
+    // ================== 手图背景 ==================
     LV_IMG_DECLARE(hand_map);
 
     lv_obj_t *img = lv_img_create(screen);
@@ -27,28 +60,24 @@ void ui_matrix_create(void)
     // ================== 圆点参数 ==================
     int dot_diameter = 8;
     int dot_spacing = 2;
+    int cell_size = dot_diameter + dot_spacing;   // 10px per cell
 
-    int start_x = 130;
-    int start_y = 130;
+    // 网格总尺寸: 11列×9行 = 110×90 px, 在360×360屏上居中
+    int grid_w = GRID_COLS * cell_size;            // 110
+    int grid_h = GRID_ROWS * cell_size;            // 90
+    int start_x = (360 - grid_w) / 2;              // 125
+    int start_y = (360 - grid_h) / 2;              // 135
 
-    for (int i = 0; i < POINT_NUM; i++)
+    // ================== 为每个通道创建圆点 ==================
+    for (int ch = 0; ch < TOTAL_POINTS; ch++)
     {
-        int r = i / COL;
-        int c = i % COL;
-
-        // ⭐ 保留你之前调好的映射
-        r = ROW - 1 - r;
-        c = COL - 1 - c;
-
-        if (r < 3)
-        {
-            c = COL - 1 - c;
-        }
+        int col = ch_col[ch];
+        int row = ch_row[ch];
 
         lv_obj_t *obj = lv_obj_create(screen);
 
-        int pos_x = start_x + c * (dot_diameter + dot_spacing);
-        int pos_y = start_y + r * (dot_diameter + dot_spacing);
+        int pos_x = start_x + col * cell_size;
+        int pos_y = start_y + row * cell_size;
 
         lv_obj_set_size(obj, dot_diameter, dot_diameter);
         lv_obj_set_pos(obj, pos_x, pos_y);
@@ -67,14 +96,14 @@ void ui_matrix_create(void)
 
         lv_obj_move_foreground(obj);
 
-        cells[i] = obj;
+        cells[ch] = obj;
     }
 
-    printf("Matrix UI created: %d points\n", POINT_NUM);
+    printf("Matrix UI created: %d points, %dx%d grid\n", TOTAL_POINTS, GRID_COLS, GRID_ROWS);
 }
 
 
-// ================== 只负责显示（无颜色逻辑） ==================
+// ================== 热力图颜色映射 ==================
 static lv_color_t heatmap_color(uint8_t intensity)
 {
     float t = intensity / 255.0f;
@@ -113,12 +142,13 @@ static lv_color_t heatmap_color(uint8_t intensity)
     return lv_color_make(r, g, b);
 }
 
+// ================== 更新阵点颜色 ==================
 void ui_matrix_update(uint16_t *cap)
 {
     #define VALUE_MIN  5
     #define VALUE_MAX  115
 
-    for (int i = 0; i < 36; i++)
+    for (int i = 0; i < TOTAL_POINTS; i++)
     {
         uint16_t val = cap[i];
 
