@@ -15,7 +15,7 @@ void uart_init_custom(void)
     uart_param_config(USART_UX, &uart_config);
     uart_set_pin(USART_UX, USART_TX_GPIO_PIN, USART_RX_GPIO_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 
-    uart_driver_install(USART_UX, 2048, 0, 0, NULL, 0);
+    uart_driver_install(USART_UX, 2048, 1024, 0, NULL, 0);
 }
 
 

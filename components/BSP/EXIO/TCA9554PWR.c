@@ -27,11 +27,12 @@ void Write_REG(uint8_t REG,uint8_t Data)                    // Write Data to the
     i2c_cmd_link_delete(cmd);                                                           
 }
 /********************************************************** Set EXIO mode **********************************************************/       
-void Mode_EXIO(uint8_t Pin,uint8_t State)                 // Set the mode of the TCA9554PWR Pin. The default is Output mode (output mode or input mode). State: 0= Output mode 1= input mode    
+void Mode_EXIO(uint8_t Pin,uint8_t State)                 // Set the mode of the TCA9554PWR Pin. The default is Output mode (output mode or input mode). State: 0= Output mode 1= input mode
 {
-    uint8_t bitsStatus = Read_REG(TCA9554_CONFIG_REG);                                
-    uint8_t Data = (0x01 << (Pin-1)) | bitsStatus;  
-    Write_REG(TCA9554_CONFIG_REG,Data);            
+    if (Pin < 1 || Pin > 8) return;
+    uint8_t bitsStatus = Read_REG(TCA9554_CONFIG_REG);
+    uint8_t Data = (0x01 << (Pin-1)) | bitsStatus;
+    Write_REG(TCA9554_CONFIG_REG,Data);
 }
 void Mode_EXIOS(uint8_t PinState)                        // Set the mode of the 7 pins from the TCA9554PWR with PinState   
 {
@@ -41,6 +42,7 @@ void Mode_EXIOS(uint8_t PinState)                        // Set the mode of the 
 /********************************************************** Read EXIO status **********************************************************/       
 uint8_t Read_EXIO(uint8_t Pin)                            // Read the level of the TCA9554PWR Pin
 {
+    if (Pin < 1 || Pin > 8) return 0;
     uint8_t inputBits =Read_REG(TCA9554_INPUT_REG);                                  
     uint8_t bitStatus = (inputBits >> (Pin-1)) & 0x01;                             
     return bitStatus;                                                              
