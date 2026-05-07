@@ -41,3 +41,32 @@ int uart_recv_data(uint8_t *buf, uint16_t max_len, uint32_t timeout_ms)
                            max_len,
                            pdMS_TO_TICKS(timeout_ms));
 }
+
+// ================ 调零（Zero Calibration）================
+static float zero_offset[ZERO_CHANNELS] = {0};
+static uint16_t latest_cap_data[ZERO_CHANNELS];
+
+void uart_update_latest_data(uint16_t *data)
+{
+    memcpy(latest_cap_data, data, sizeof(latest_cap_data));
+}
+
+void uart_apply_zero(uint16_t *data)
+{
+    for (int i = 0; i < ZERO_CHANNELS; i++) {
+        if (data[i] >= zero_offset[i]) {
+            data[i] -= (uint16_t)zero_offset[i];
+        } else {
+            data[i] = 0;
+        }
+    }
+}
+
+// 调零：将当前 raw_value 记录为各通道零点偏移
+void uart_zero_calibrate(void)
+{
+    for (int i = 0; i < ZERO_CHANNELS; i++) {
+        zero_offset[i] = (float)latest_cap_data[i];
+    }
+    printf("Zero calibrated\r\n");
+}

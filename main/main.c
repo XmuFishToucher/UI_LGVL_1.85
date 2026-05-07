@@ -70,6 +70,8 @@ void uart_task(void *arg)
                         uint8_t high = frame[3 + j*2];
                         matrix_data[j] = (high << 8) | low;
                     }
+                    uart_update_latest_data(matrix_data);
+                    uart_apply_zero(matrix_data);
                     ui_matrix_update(matrix_data);
                     lvgl_port_unlock();
 
@@ -112,7 +114,7 @@ void app_main(void)
 
     uart_init_custom();
 
-    BaseType_t task_ret = xTaskCreate(uart_task, "uart_task", 4096, NULL, 5, NULL);
+    BaseType_t task_ret = xTaskCreate(uart_task, "uart_task", 8192, NULL, 5, NULL);
     if (task_ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create UART task: %d", task_ret);
         return;

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"D:\\\\Documents\\\\ESP_Projects\\\\LCD-1.69\")",
+      "Read(//d/Documents/ESP_Projects/LCD-1.69/**)",
+      "Bash(find \"D:\\\\Documents\\\\ESP_Projects\\\\LCD-1.69\" -maxdepth 3 -type d | head -80)"
+    ]
+  }
+}

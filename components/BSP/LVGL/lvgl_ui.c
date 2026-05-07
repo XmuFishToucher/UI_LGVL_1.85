@@ -5,11 +5,17 @@
 #include "ST77916.h"
 #include "CST816.h"
 #include "ui_matrix.h"
+#include "uart.h"
 
 static const char *TAG = "LVGL_UI";
 
 static lv_display_t *lvgl_disp = NULL;
 static lv_indev_t *lvgl_touch_indev = NULL;
+
+static void zero_btn_cb(lv_event_t *e)
+{
+    uart_zero_calibrate();
+}
 
 esp_err_t lvgl_ui_init(void)
 {
@@ -62,6 +68,15 @@ esp_err_t lvgl_ui_init(void)
     lvgl_port_lock(0);
 
     ui_matrix_create();   // 👈 核心！！！
+
+    // 创建调零按钮
+    lv_obj_t *btn = lv_button_create(lv_screen_active());
+    lv_obj_set_size(btn, 70, 40);
+    lv_obj_align(btn, LV_ALIGN_BOTTOM_LEFT, 30, -50);
+    lv_obj_t *label = lv_label_create(btn);
+    lv_label_set_text(label, "ZERO");
+    lv_obj_center(label);
+    lv_obj_add_event_cb(btn, zero_btn_cb, LV_EVENT_CLICKED, NULL);
 
     lvgl_port_unlock();
 

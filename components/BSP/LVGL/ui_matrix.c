@@ -142,27 +142,22 @@ static lv_color_t heatmap_color(uint8_t intensity)
     return lv_color_make(r, g, b);
 }
 
+#define VALUE_MAX 80
+
 // ================== 更新阵点颜色 ==================
 void ui_matrix_update(uint16_t *cap)
 {
-    #define VALUE_MIN  5
-    #define VALUE_MAX  115
-
     for (int i = 0; i < TOTAL_POINTS; i++)
     {
         uint16_t val = cap[i];
-
         uint8_t intensity;
 
-        if (val < VALUE_MIN)
-            intensity = 0;
-        else if (val > VALUE_MAX)
+        if (val > VALUE_MAX)
             intensity = 255;
         else
-            intensity = (val - VALUE_MIN) * 255 / (VALUE_MAX - VALUE_MIN);
+            intensity = val * 255 / VALUE_MAX;
 
         lv_color_t color = heatmap_color(intensity);
-
         lv_obj_set_style_bg_color(cells[i], color, 0);
     }
 
