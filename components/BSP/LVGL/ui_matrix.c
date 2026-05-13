@@ -4,40 +4,59 @@
 
 // ======================= 网格参数 =======================
 #define TOTAL_POINTS 47
-#define GRID_COLS    11
-#define GRID_ROWS    9
 
 // ======================= 通道 -> 网格位置映射表 =======================
-// 每个通道在视觉网格中的 (col, row) 位置
-// 拇指 col=0, 手掌 cols=1-9, 小指 col=10
-// 手指区 rows=0-2 (屏上方), 手掌区 rows=3-8 (屏下方)
+// 使用浮点网格坐标 (gx, gy), 参照 LCD-1.69 方式
+// 手掌: gx=0..5, gy=0..5 形成 6×6 矩形, 列间距=行间距=1格
+// 手指: 独立浮点坐标, 位于手掌上方
+// ch 0→小指, ch 46→拇指 (通道号已反转)
 
-static const uint8_t ch_col[TOTAL_POINTS] = {
-     0,                                            // ch 0:  拇指 (pin 2)
-     1, 1, 1, 1, 1, 1,                            // ch 1-6:  手掌第1列 (pin 3-8, 上→下)
-     2, 2, 2, 2, 2, 2,                            // ch 7-12: 手掌第2列 (pin 9-14, 上→下)
-     3, 3, 3,                                      // ch 13-15: 食指 (pin 15-17, 下中上)
-     4, 4, 4, 4, 4, 4,                            // ch 16-21: 手掌第3列 (pin 18-23, 上→下)
-     5, 5, 5, 5, 5, 5,                            // ch 22-27: 手掌第4列 (pin 24-29, 下→上)
-     6, 6, 6,                                      // ch 28-30: 中指 (pin 30-32, 下中上)
-     7, 7, 7, 7, 7, 7,                            // ch 31-36: 手掌第5列 (pin 33-38, 下→上)
-     8, 8, 8,                                      // ch 37-39: 无名指 (pin 39-41, 下中上)
-     9, 9, 9, 9, 9, 9,                            // ch 40-45: 手掌第6列 (pin 42-47, 下→上)
-    10                                             // ch 46: 小指 (pin 48)
-};
+typedef struct {
+    uint8_t ch;
+    float gx;
+    float gy;
+} point_def_t;
 
-static const uint8_t ch_row[TOTAL_POINTS] = {
-     5,                                            // ch 0:  拇指 (手掌中段)
-     3, 4, 5, 6, 7, 8,                            // ch 1-6:  手掌第1列 上→下
-     3, 4, 5, 6, 7, 8,                            // ch 7-12: 手掌第2列 上→下
-     2, 1, 0,                                      // ch 13-15: 食指 下→中→上 (pin 15/16/17, 视觉从下到上)
-     3, 4, 5, 6, 7, 8,                            // ch 16-21: 手掌第3列 上→下
-     8, 7, 6, 5, 4, 3,                            // ch 22-27: 手掌第4列 下→上 (pin 24-29 下→上)
-     2, 1, 0,                                      // ch 28-30: 中指 下→中→上 (pin 30/31/32)
-     8, 7, 6, 5, 4, 3,                            // ch 31-36: 手掌第5列 下→上 (pin 33-38 下→上)
-     2, 1, 0,                                      // ch 37-39: 无名指 下→中→上 (pin 39/40/41)
-     8, 7, 6, 5, 4, 3,                            // ch 40-45: 手掌第6列 下→上 (pin 42-47 下→上)
-     0                                             // ch 46: 小指 (pin 48, 指尖)
+static const point_def_t points[TOTAL_POINTS] = {
+
+    // ===== 小指 (ch 0, pin 48) =====
+    { 0,  6.5f, -1.0f},
+
+    // ===== 手掌第6列 (ch 1-6, pins 47-42, gx=5, gy=0..5 上→下) =====
+    { 1,  5.0f, 0},  { 2,  5.0f, 1},  { 3,  5.0f, 2},
+    { 4,  5.0f, 3},  { 5,  5.0f, 4},  { 6,  5.0f, 5},
+
+    // ===== 无名指 (ch 7-9, pins 41-39, 指尖→指根) =====
+    { 7,  3.8f, -5.0f},  { 8,  3.8f, -3.0f},  { 9,  3.8f, -1.5f},
+
+    // ===== 手掌第5列 (ch 10-15, pins 38-33, gx=4, gy=0..5 上→下) =====
+    {10,  4.0f, 0},  {11,  4.0f, 1},  {12,  4.0f, 2},
+    {13,  4.0f, 3},  {14,  4.0f, 4},  {15,  4.0f, 5},
+
+    // ===== 中指 (ch 16-18, pins 32-30, 指尖→指根) =====
+    {16,  2.0f, -6.0f},  {17,  2.0f, -3.5f},  {18,  2.0f, -1.5f},
+
+    // ===== 手掌第4列 (ch 19-24, pins 29-24, gx=3, gy=0..5 上→下) =====
+    {19,  3.0f, 0},  {20,  3.0f, 1},  {21,  3.0f, 2},
+    {22,  3.0f, 3},  {23,  3.0f, 4},  {24,  3.0f, 5},
+
+    // ===== 手掌第3列 (ch 25-30, pins 23-18, gx=2, gy=5..0 上→下) =====
+    {25,  2.0f, 5},  {26,  2.0f, 4},  {27,  2.0f, 3},
+    {28,  2.0f, 2},  {29,  2.0f, 1},  {30,  2.0f, 0},
+
+    // ===== 食指 (ch 31-33, pins 17-15, 指尖→指根) =====
+    {31,  -1.2f, -5.0f},  {32,  -1.2f, -3.0f},  {33,  -1.2f, -1.5f},
+
+    // ===== 手掌第2列 (ch 34-39, pins 14-9, gx=1, gy=5..0 上→下) =====
+    {34,  1.0f, 5},  {35,  1.0f, 4},  {36,  1.0f, 3},
+    {37,  1.0f, 2},  {38,  1.0f, 1},  {39,  1.0f, 0},
+
+    // ===== 手掌第1列 (ch 40-45, pins 8-3, gx=0, gy=5..0 上→下) =====
+    {40,  0.0f, 5},  {41,  0.0f, 4},  {42,  0.0f, 3},
+    {43,  0.0f, 2},  {44,  0.0f, 1},  {45,  0.0f, 0},
+
+    // ===== 拇指 (ch 46, pin 2) =====
+    {46, -2.5f, 2.5f},
 };
 
 static lv_obj_t *cells[TOTAL_POINTS];
@@ -58,26 +77,25 @@ void ui_matrix_create(void)
     lv_obj_center(img);
 
     // ================== 圆点参数 ==================
-    int dot_diameter = 8;
-    int dot_spacing = 2;
-    int cell_size = dot_diameter + dot_spacing;   // 10px per cell
+    int dot_diameter = 12;
+    int dot_spacing = 3;
+    int cell_size = dot_diameter + dot_spacing;   // 20px per grid unit
 
-    // 网格总尺寸: 11列×9行 = 110×90 px, 在360×360屏上居中
-    int grid_w = GRID_COLS * cell_size;            // 110
-    int grid_h = GRID_ROWS * cell_size;            // 90
-    int start_x = (360 - grid_w) / 2;              // 125
-    int start_y = (360 - grid_h) / 2;              // 135
+    // 坐标范围: gx=-2.5..5.5, gy=-5.0..6.0
+    float min_gx = -2.5f, max_gx = 5.5f;
+    float min_gy = -5.0f, max_gy = 6.0f;
+    int grid_w = (int)((max_gx - min_gx) * cell_size) - dot_spacing;
+    int grid_h = (int)((max_gy - min_gy) * cell_size) - dot_spacing;
+    int start_x = (360 - grid_w) / 2;
+    int start_y = (360 - grid_h) / 2;
 
     // ================== 为每个通道创建圆点 ==================
-    for (int ch = 0; ch < TOTAL_POINTS; ch++)
+    for (int i = 0; i < TOTAL_POINTS; i++)
     {
-        int col = ch_col[ch];
-        int row = ch_row[ch];
-
         lv_obj_t *obj = lv_obj_create(screen);
 
-        int pos_x = start_x + col * cell_size;
-        int pos_y = start_y + row * cell_size;
+        int pos_x = start_x + (int)((points[i].gx - min_gx) * cell_size);
+        int pos_y = start_y + (int)((points[i].gy - min_gy) * cell_size);
 
         lv_obj_set_size(obj, dot_diameter, dot_diameter);
         lv_obj_set_pos(obj, pos_x, pos_y);
@@ -93,13 +111,15 @@ void ui_matrix_create(void)
         lv_obj_set_style_border_width(obj, 0, 0);
         lv_obj_set_style_shadow_width(obj, 0, 0);
         lv_obj_set_style_outline_width(obj, 0, 0);
+        lv_obj_set_scrollbar_mode(obj, LV_SCROLLBAR_MODE_OFF);
 
         lv_obj_move_foreground(obj);
 
-        cells[ch] = obj;
+        cells[i] = obj;
     }
 
-    printf("Matrix UI created: %d points, %dx%d grid\n", TOTAL_POINTS, GRID_COLS, GRID_ROWS);
+    printf("Matrix UI created: %d points, grid %dx%d at (%d,%d)\r\n",
+           TOTAL_POINTS, grid_w, grid_h, start_x, start_y);
 }
 
 
@@ -149,7 +169,7 @@ void ui_matrix_update(uint16_t *cap)
 {
     for (int i = 0; i < TOTAL_POINTS; i++)
     {
-        uint16_t val = cap[i];
+        uint16_t val = cap[points[i].ch];
         uint8_t intensity;
 
         if (val > VALUE_MAX)
