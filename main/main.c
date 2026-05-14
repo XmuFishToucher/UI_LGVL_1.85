@@ -4,6 +4,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
@@ -11,6 +12,10 @@
 #include "lvgl_ui.h"
 #include "uart.h"
 #include "ui_matrix.h"
+
+#include "wifi_manager.h"
+#include "onenet_mqtt.h"
+#include "nvs_flash.h"
 
 static const char *TAG = "MAIN";
 
@@ -23,6 +28,27 @@ static uint8_t rx_buf[256];
 static int rx_len = 0;
 
 static uint16_t matrix_data[TOTAL_POINTS];
+
+#define ssid "eeg"
+#define password "zhangxu123"
+
+static EventGroupHandle_t wifi_ev = NULL;
+#define WIFI_CONNECTED_BIT BIT0
+
+static void wifi_state_cb(WIFI_STATE state)
+{
+    switch (state) {
+    case WIFI_STATE_DISCONNECTED:
+        ESP_LOGI("wifi_state_cb", "WIFI_STATE_DISCONNECTED");
+        break;
+    case WIFI_STATE_CONNECTED:
+        ESP_LOGI("wifi_state_cb", "WIFI_STATE_CONNECTED");
+        xEventGroupSetBits(wifi_ev, WIFI_CONNECTED_BIT);
+        break;
+    default:
+        break;
+    }
+}
 
 void uart_task(void *arg)
 {
@@ -75,15 +101,15 @@ void uart_task(void *arg)
                     ui_matrix_update(matrix_data);
                     lvgl_port_unlock();
 
-                    // 打印验证
-                    ESP_LOGI(TAG, "Matrix (%d pts):", TOTAL_POINTS);
-                    for (int j = 0; j < TOTAL_POINTS; j++)
-                    {
-                        printf("%4d ", matrix_data[j]);
-                        if ((j + 1) % 11 == 0)
-                            printf("\n");
-                    }
-                    printf("\n");
+                    // // 打印验证
+                    // ESP_LOGI(TAG, "Matrix (%d pts):", TOTAL_POINTS);
+                    // for (int j = 0; j < TOTAL_POINTS; j++)
+                    // {
+                    //     printf("%4d ", matrix_data[j]);
+                    //     if ((j + 1) % 11 == 0)
+                    //         printf("\n");
+                    // }
+                    // printf("\n");
 
                     // 移除已处理数据
                     memmove(rx_buf, rx_buf + i + FRAME_SIZE, rx_len - (i + FRAME_SIZE));
@@ -100,11 +126,27 @@ void uart_task(void *arg)
 
 void app_main(void)
 {
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+    wifi_ev = xEventGroupCreate();
+    wifi_manager_init(wifi_state_cb);
+    wifi_manager_connect(ssid, password);
+    EventBits_t ev;
+    ev = xEventGroupWaitBits(wifi_ev, WIFI_CONNECTED_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
+    if(ev & WIFI_CONNECTED_BIT)
+    {
+        onenet_start();
+    }
+
     ESP_LOGI(TAG, "Initializing BSP...");
     LCD_Init();
 
     ESP_LOGI(TAG, "Initializing LVGL UI...");
-    esp_err_t ret = lvgl_ui_init();
+    ret = lvgl_ui_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "LVGL UI initialization failed: %d", ret);
         return;
