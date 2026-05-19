@@ -29,6 +29,7 @@ static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
 {
     if (!hqtt_handle) return ESP_FAIL;
 
+    // ===== 物模型上报 (发给 OneNET 平台) =====
     char topic[128];
     snprintf(topic, sizeof(topic), "$sys/%s/%s/thing/property/post",
              ONENET_PRODUCT_ID, ONENET_DEVICE_NAME);
@@ -38,17 +39,14 @@ static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
     cJSON_AddStringToObject(root, "version", "1.0");
     cJSON *params = cJSON_CreateObject();
 
-    // source_id
     cJSON *src = cJSON_CreateObject();
     cJSON_AddStringToObject(src, "value", ONENET_DEVICE_NAME);
     cJSON_AddItemToObject(params, "source_id", src);
 
-    // max_tx_idx
     cJSON *ch = cJSON_CreateObject();
     cJSON_AddNumberToObject(ch, "value", channel);
     cJSON_AddItemToObject(params, "max_tx_idx", ch);
 
-    // max_tx_value
     cJSON *val = cJSON_CreateObject();
     cJSON_AddNumberToObject(val, "value", value);
     cJSON_AddItemToObject(params, "max_tx_value", val);
@@ -60,6 +58,17 @@ static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
     esp_mqtt_client_publish(hqtt_handle, topic, data, strlen(data), 1, 0);
     cJSON_Delete(root);
     cJSON_free(data);
+
+    // ===== 自定义 Topic (发给 Device B，简化 JSON) =====
+    cJSON *direct = cJSON_CreateObject();
+    cJSON_AddNumberToObject(direct, "max_tx_idx", channel);
+    cJSON_AddNumberToObject(direct, "max_tx_value", value);
+    char *direct_data = cJSON_PrintUnformatted(direct);
+    esp_mqtt_client_publish(hqtt_handle, CUSTOM_TOPIC, direct_data, strlen(direct_data), 1, 0);
+    ESP_LOGI(TAG, "Direct: %s -> %s", CUSTOM_TOPIC, direct_data);
+    cJSON_Delete(direct);
+    cJSON_free(direct_data);
+
     return ESP_OK;
 }
 
