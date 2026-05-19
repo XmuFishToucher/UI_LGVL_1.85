@@ -98,12 +98,14 @@ static void onenet_property_handle(cJSON *property)
         }
     }
 
+    int channel = -1, value = -1;
+
     // 解析 max_tx_idx
     cJSON *ch = cJSON_GetObjectItem(params, "max_tx_idx");
     if (ch) {
         cJSON *ch_val = cJSON_GetObjectItem(ch, "value");
         if (ch_val) {
-            int channel = (int)cJSON_GetNumberValue(ch_val);
+            channel = (int)cJSON_GetNumberValue(ch_val);
             ESP_LOGI(TAG, "Received max_tx_idx: %d", channel);
         }
     }
@@ -113,9 +115,13 @@ static void onenet_property_handle(cJSON *property)
     if (val) {
         cJSON *val_val = cJSON_GetObjectItem(val, "value");
         if (val_val) {
-            int value = (int)cJSON_GetNumberValue(val_val);
+            value = (int)cJSON_GetNumberValue(val_val);
             ESP_LOGI(TAG, "Received max_tx_value: %d", value);
         }
+    }
+
+    if (channel >= 0 && channel < 47 && value >= 0) {
+        matrix_update_from_mqtt((uint8_t)channel, (uint16_t)value);
     }
 }
 
@@ -150,8 +156,6 @@ static void onenet_subscribe(void)
              ONENET_PRODUCT_ID, ONENET_DEVICE_NAME);
     esp_mqtt_client_subscribe_single(hqtt_handle, topic, 1);
 
-    // 订阅 OneNET MQ 实例，接收规则引擎转发的 Device A 数据
-    esp_mqtt_client_subscribe_single(hqtt_handle, "tactile/interaction", 1);
 }
 
 // 从 JSON 中解析 max_tx_idx / max_tx_value (params 内嵌 value 格式)
@@ -223,8 +227,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 }
                 cJSON_Delete(property);
             }
-        } else if (strstr(event->topic, "tactile/interaction") != NULL) {
-            onenet_parse_max_data(event->data, event->data_len);
         }
         break;
     case MQTT_EVENT_ERROR:
