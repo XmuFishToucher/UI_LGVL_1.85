@@ -84,6 +84,18 @@ void sensor_publish_max_channel(const uint16_t *data)
 
 // ==================== 属性处理 (接收对端数据) ====================
 
+static int parse_property_number(cJSON *params, const char *key)
+{
+    cJSON *item = cJSON_GetObjectItem(params, key);
+    if (!item) return -1;
+    if (cJSON_IsNumber(item)) return item->valueint;
+
+    cJSON *value = cJSON_GetObjectItem(item, "value");
+    if (value && cJSON_IsNumber(value)) return value->valueint;
+
+    return -1;
+}
+
 static void onenet_property_handle(cJSON *property)
 {
     cJSON *params = cJSON_GetObjectItem(property, "params");
@@ -91,37 +103,29 @@ static void onenet_property_handle(cJSON *property)
 
     // 解析 source_id
     cJSON *src = cJSON_GetObjectItem(params, "source_id");
-    if (src) {
-        cJSON *src_val = cJSON_GetObjectItem(src, "value");
-        if (src_val && src_val->valuestring) {
-            ESP_LOGI(TAG, "Data from: %s", src_val->valuestring);
-        }
+    cJSON *src_val = src && cJSON_IsString(src) ? src : NULL;
+    if (!src_val && src) {
+        src_val = cJSON_GetObjectItem(src, "value");
+    }
+    if (!src_val || !src_val->valuestring) {
+        ESP_LOGW(TAG, "Ignore property set without source_id");
+        return;
     }
 
-    int channel = -1, value = -1;
-
-    // 解析 max_tx_idx
-    cJSON *ch = cJSON_GetObjectItem(params, "max_tx_idx");
-    if (ch) {
-        cJSON *ch_val = cJSON_GetObjectItem(ch, "value");
-        if (ch_val) {
-            channel = (int)cJSON_GetNumberValue(ch_val);
-            ESP_LOGI(TAG, "Received max_tx_idx: %d", channel);
-        }
+    ESP_LOGI(TAG, "Data from: %s", src_val->valuestring);
+    if (strcmp(src_val->valuestring, ONENET_EXPECTED_SOURCE_ID) != 0) {
+        ESP_LOGW(TAG, "Ignore property set from unexpected source: %s", src_val->valuestring);
+        return;
     }
 
-    // 解析 max_tx_value
-    cJSON *val = cJSON_GetObjectItem(params, "max_tx_value");
-    if (val) {
-        cJSON *val_val = cJSON_GetObjectItem(val, "value");
-        if (val_val) {
-            value = (int)cJSON_GetNumberValue(val_val);
-            ESP_LOGI(TAG, "Received max_tx_value: %d", value);
-        }
-    }
+    int channel = parse_property_number(params, "max_tx_idx");
+    int value = parse_property_number(params, "max_tx_value");
 
     if (channel >= 0 && channel < 47 && value >= 0) {
+        ESP_LOGI(TAG, "Apply max data: channel=%d value=%d", channel, value);
         matrix_update_from_mqtt((uint8_t)channel, (uint16_t)value);
+    } else {
+        ESP_LOGW(TAG, "Ignore invalid max data: channel=%d value=%d", channel, value);
     }
 }
 
@@ -156,40 +160,6 @@ static void onenet_subscribe(void)
              ONENET_PRODUCT_ID, ONENET_DEVICE_NAME);
     esp_mqtt_client_subscribe_single(hqtt_handle, topic, 1);
 
-    // 订阅自定义 Topic, 接收 Device A 直接发送的数据
-    esp_mqtt_client_subscribe_single(hqtt_handle, CUSTOM_TOPIC, 1);
-}
-
-// 解析两种格式:
-//   Simplified: {"max_tx_idx":23,"max_tx_value":218}
-//   Nested:     {"params":{"max_tx_idx":{"value":23},"max_tx_value":{"value":218}}}
-static int parse_value(cJSON *parent, const char *key)
-{
-    cJSON *item = cJSON_GetObjectItem(parent, key);
-    if (!item) return -1;
-    if (cJSON_IsNumber(item)) return item->valueint;
-    cJSON *v = cJSON_GetObjectItem(item, "value");
-    if (v && cJSON_IsNumber(v)) return v->valueint;
-    return -1;
-}
-
-static void onenet_parse_max_data(const char *data, int data_len)
-{
-    cJSON *root = cJSON_ParseWithLength(data, data_len);
-    if (!root) return;
-
-    cJSON *params = cJSON_GetObjectItem(root, "params");
-    if (!params) params = root;
-
-    int ch = parse_value(params, "max_tx_idx");
-    int val = parse_value(params, "max_tx_value");
-
-    if (ch >= 0 && ch < 47 && val >= 0) {
-        ESP_LOGI(TAG, "Interaction: ch=%d val=%d", ch, val);
-        matrix_update_from_mqtt((uint8_t)ch, (uint16_t)val);
-    }
-
-    cJSON_Delete(root);
 }
 
 // ==================== MQTT 事件处理 ====================
@@ -229,8 +199,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 }
                 cJSON_Delete(property);
             }
-        } else if (strstr(event->topic, CUSTOM_TOPIC) != NULL) {
-            onenet_parse_max_data(event->data, event->data_len);
         }
         break;
     case MQTT_EVENT_ERROR:

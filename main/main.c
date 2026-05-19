@@ -61,15 +61,6 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-    wifi_ev = xEventGroupCreate();
-    wifi_manager_init(wifi_state_cb);
-    wifi_manager_connect(ssid, password);
-    EventBits_t ev;
-    ev = xEventGroupWaitBits(wifi_ev, WIFI_CONNECTED_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
-    if (ev & WIFI_CONNECTED_BIT)
-    {
-        onenet_start();
-    }
 
     ESP_LOGI(TAG, "Initializing BSP...");
     LCD_Init();
@@ -79,6 +70,16 @@ void app_main(void)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "LVGL UI initialization failed: %d", ret);
         return;
+    }
+
+    wifi_ev = xEventGroupCreate();
+    wifi_manager_init(wifi_state_cb);
+    wifi_manager_connect(ssid, password);
+    EventBits_t ev;
+    ev = xEventGroupWaitBits(wifi_ev, WIFI_CONNECTED_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
+    if (ev & WIFI_CONNECTED_BIT)
+    {
+        onenet_start();
     }
 
     ESP_LOGI(TAG, "Device B ready, waiting for MQTT data...\n");

@@ -7,9 +7,7 @@
 #define ONENET_PRODUCT_ID "8x5w9DD3Av"
 #define ONENET_PRODUCT_ACCESS_KEY "UycLzekhG0HPmcMDzS03H/PB8QtHzRX9jdk/h4EdUxk="
 #define ONENET_DEVICE_NAME "device_B"
-
-// 自定义 Topic: Device A → Device B 直通
-#define CUSTOM_TOPIC "8x5w9DD3Av/interaction"
+#define ONENET_EXPECTED_SOURCE_ID "device_A"
 
 // 矩阵单点更新 (由 main.c 实现, MQTT 收到数据后调用)
 void matrix_update_from_mqtt(uint8_t ch, uint16_t val);
