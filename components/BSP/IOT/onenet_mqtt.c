@@ -156,31 +156,33 @@ static void onenet_subscribe(void)
              ONENET_PRODUCT_ID, ONENET_DEVICE_NAME);
     esp_mqtt_client_subscribe_single(hqtt_handle, topic, 1);
 
+    // 订阅自定义 Topic, 接收 Device A 直接发送的数据
+    esp_mqtt_client_subscribe_single(hqtt_handle, CUSTOM_TOPIC, 1);
 }
 
-// 从 JSON 中解析 max_tx_idx / max_tx_value (params 内嵌 value 格式)
+// 解析两种格式:
+//   Simplified: {"max_tx_idx":23,"max_tx_value":218}
+//   Nested:     {"params":{"max_tx_idx":{"value":23},"max_tx_value":{"value":218}}}
+static int parse_value(cJSON *parent, const char *key)
+{
+    cJSON *item = cJSON_GetObjectItem(parent, key);
+    if (!item) return -1;
+    if (cJSON_IsNumber(item)) return item->valueint;
+    cJSON *v = cJSON_GetObjectItem(item, "value");
+    if (v && cJSON_IsNumber(v)) return v->valueint;
+    return -1;
+}
+
 static void onenet_parse_max_data(const char *data, int data_len)
 {
     cJSON *root = cJSON_ParseWithLength(data, data_len);
     if (!root) return;
 
-    // 尝试 params 下的字段 (thing/property/post 格式)
     cJSON *params = cJSON_GetObjectItem(root, "params");
-    if (!params) params = root;  // 回退到根对象
+    if (!params) params = root;
 
-    int ch = -1, val = -1;
-
-    cJSON *idx = cJSON_GetObjectItem(params, "max_tx_idx");
-    if (idx) {
-        cJSON *v = cJSON_GetObjectItem(idx, "value");
-        if (v && cJSON_IsNumber(v)) ch = v->valueint;
-    }
-
-    cJSON *tv = cJSON_GetObjectItem(params, "max_tx_value");
-    if (tv) {
-        cJSON *v = cJSON_GetObjectItem(tv, "value");
-        if (v && cJSON_IsNumber(v)) val = v->valueint;
-    }
+    int ch = parse_value(params, "max_tx_idx");
+    int val = parse_value(params, "max_tx_value");
 
     if (ch >= 0 && ch < 47 && val >= 0) {
         ESP_LOGI(TAG, "Interaction: ch=%d val=%d", ch, val);
@@ -227,6 +229,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 }
                 cJSON_Delete(property);
             }
+        } else if (strstr(event->topic, CUSTOM_TOPIC) != NULL) {
+            onenet_parse_max_data(event->data, event->data_len);
         }
         break;
     case MQTT_EVENT_ERROR:
