@@ -101,6 +101,9 @@ void uart_task(void *arg)
                     ui_matrix_update(matrix_data);
                     lvgl_port_unlock();
 
+                    // MQTT 发布最大值通道和强度 (含全零过滤 + 100ms 限流)
+                    sensor_publish_max_channel(matrix_data);
+
                     // // 打印验证
                     // ESP_LOGI(TAG, "Matrix (%d pts):", TOTAL_POINTS);
                     // for (int j = 0; j < TOTAL_POINTS; j++)
