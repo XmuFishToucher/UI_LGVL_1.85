@@ -149,6 +149,41 @@ static void onenet_subscribe(void)
     snprintf(topic, sizeof(topic), "$sys/%s/%s/thing/property/post/reply",
              ONENET_PRODUCT_ID, ONENET_DEVICE_NAME);
     esp_mqtt_client_subscribe_single(hqtt_handle, topic, 1);
+
+    // 订阅 OneNET MQ 实例，接收规则引擎转发的 Device A 数据
+    esp_mqtt_client_subscribe_single(hqtt_handle, "tactile/interaction", 1);
+}
+
+// 从 JSON 中解析 max_tx_idx / max_tx_value (params 内嵌 value 格式)
+static void onenet_parse_max_data(const char *data, int data_len)
+{
+    cJSON *root = cJSON_ParseWithLength(data, data_len);
+    if (!root) return;
+
+    // 尝试 params 下的字段 (thing/property/post 格式)
+    cJSON *params = cJSON_GetObjectItem(root, "params");
+    if (!params) params = root;  // 回退到根对象
+
+    int ch = -1, val = -1;
+
+    cJSON *idx = cJSON_GetObjectItem(params, "max_tx_idx");
+    if (idx) {
+        cJSON *v = cJSON_GetObjectItem(idx, "value");
+        if (v && cJSON_IsNumber(v)) ch = v->valueint;
+    }
+
+    cJSON *tv = cJSON_GetObjectItem(params, "max_tx_value");
+    if (tv) {
+        cJSON *v = cJSON_GetObjectItem(tv, "value");
+        if (v && cJSON_IsNumber(v)) val = v->valueint;
+    }
+
+    if (ch >= 0 && ch < 47 && val >= 0) {
+        ESP_LOGI(TAG, "Interaction: ch=%d val=%d", ch, val);
+        matrix_update_from_mqtt((uint8_t)ch, (uint16_t)val);
+    }
+
+    cJSON_Delete(root);
 }
 
 // ==================== MQTT 事件处理 ====================
@@ -188,6 +223,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 }
                 cJSON_Delete(property);
             }
+        } else if (strstr(event->topic, "tactile/interaction") != NULL) {
+            onenet_parse_max_data(event->data, event->data_len);
         }
         break;
     case MQTT_EVENT_ERROR:
