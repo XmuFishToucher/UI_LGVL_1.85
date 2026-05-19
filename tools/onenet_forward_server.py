@@ -18,8 +18,10 @@ Useful environment variables:
   FORWARD_HOST                 default: 127.0.0.1
   FORWARD_PORT                 default: 3000
   FORWARD_SHARED_TOKEN         optional token checked against query/header/body
+  FORWARD_REQUIRE_POST_TOKEN   default: 0; set to 1 to require token on POST
   TARGET_DEVICE_NAME           default: device_B
   EXPECTED_SOURCE_ID           default: device_A
+  ONENET_PRODUCT_ID            default: 8x5w9DD3Av
 
   ONENET_SET_PROPERTY_URL      required to really call OneNET; otherwise dry-run
   ONENET_AUTH_HEADER_NAME      default: authorization
@@ -44,6 +46,7 @@ import base64
 import hashlib
 import json
 import os
+import socket
 import sys
 import time
 import urllib.error
@@ -59,7 +62,9 @@ PATH = "/onenet/forward"
 
 TARGET_DEVICE_NAME = os.getenv("TARGET_DEVICE_NAME", "device_B")
 EXPECTED_SOURCE_ID = os.getenv("EXPECTED_SOURCE_ID", "device_A")
+ONENET_PRODUCT_ID = os.getenv("ONENET_PRODUCT_ID", "8x5w9DD3Av")
 SHARED_TOKEN = os.getenv("FORWARD_SHARED_TOKEN", "")
+REQUIRE_POST_TOKEN = os.getenv("FORWARD_REQUIRE_POST_TOKEN", "0") == "1"
 
 ONENET_SET_PROPERTY_URL = os.getenv("ONENET_SET_PROPERTY_URL", "")
 ONENET_AUTH_HEADER_NAME = os.getenv("ONENET_AUTH_HEADER_NAME", "authorization")
@@ -68,6 +73,7 @@ ONENET_SET_PROPERTY_BODY = os.getenv(
     "ONENET_SET_PROPERTY_BODY",
     json.dumps(
         {
+            "product_id": "{product_id}",
             "device_name": "{target_device}",
             "params": {
                 "source_id": "{source_id}",
@@ -101,6 +107,7 @@ def unwrap_value(value: Any) -> Any:
 
 
 def find_params(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = normalize_push_payload(payload)
     candidates = [
         get_nested(payload, "data", "params"),
         get_nested(payload, "params"),
@@ -116,7 +123,20 @@ def find_params(payload: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def normalize_push_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    msg = payload.get("msg")
+    if isinstance(msg, str):
+        try:
+            parsed = json.loads(msg)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            return payload
+    return payload
+
+
 def extract_forward_data(payload: dict[str, Any]) -> tuple[str, int, int]:
+    payload = normalize_push_payload(payload)
     params = find_params(payload)
 
     source_id = unwrap_value(params.get("source_id"))
@@ -147,6 +167,7 @@ def render_body(source_id: str, max_tx_idx: int, max_tx_value: int) -> bytes:
         .replace("{max_tx_idx}", str(max_tx_idx))
         .replace("{max_tx_value}", str(max_tx_value))
         .replace("{target_device}", TARGET_DEVICE_NAME)
+        .replace("{product_id}", ONENET_PRODUCT_ID)
     )
     data = json.loads(body)
 
@@ -239,7 +260,7 @@ class ForwardHandler(BaseHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": f"invalid json: {exc}"})
             return
 
-        if SHARED_TOKEN and not self.token_matches(query, payload):
+        if SHARED_TOKEN and REQUIRE_POST_TOKEN and not self.token_matches(query, payload):
             self.send_json(401, {"ok": False, "error": "bad token"})
             return
 
@@ -254,6 +275,8 @@ class ForwardHandler(BaseHTTPRequestHandler):
             status, response = call_onenet(source_id, max_tx_idx, max_tx_value)
             ok = 200 <= status < 300
             self.send_json(status if ok else 502, {"ok": ok, "onenet_status": status, "response": response})
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, socket.timeout) as exc:
+            log(f"client disconnected before response was sent: {exc}")
         except Exception as exc:  # noqa: BLE001 - small ops script, return error to caller.
             log(f"error: {exc}")
             self.send_json(400, {"ok": False, "error": str(exc)})
@@ -275,7 +298,10 @@ class ForwardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, socket.timeout) as exc:
+            log(f"client disconnected while writing json response: {exc}")
 
     def send_text(self, status: int, text: str) -> None:
         body = text.encode("utf-8")
@@ -283,7 +309,10 @@ class ForwardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, socket.timeout) as exc:
+            log(f"client disconnected while writing text response: {exc}")
 
     def log_message(self, fmt: str, *args: Any) -> None:
         log(f"{self.client_address[0]} {fmt % args}")
