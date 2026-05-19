@@ -43,15 +43,15 @@ static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
     cJSON_AddStringToObject(src, "value", ONENET_DEVICE_NAME);
     cJSON_AddItemToObject(params, "source_id", src);
 
-    // max_channel
+    // max_tx_idx
     cJSON *ch = cJSON_CreateObject();
     cJSON_AddNumberToObject(ch, "value", channel);
-    cJSON_AddItemToObject(params, "max_channel", ch);
+    cJSON_AddItemToObject(params, "max_tx_idx", ch);
 
-    // max_value
+    // max_tx_value
     cJSON *val = cJSON_CreateObject();
     cJSON_AddNumberToObject(val, "value", value);
-    cJSON_AddItemToObject(params, "max_value", val);
+    cJSON_AddItemToObject(params, "max_tx_value", val);
 
     cJSON_AddItemToObject(root, "params", params);
 
@@ -63,23 +63,14 @@ static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
     return ESP_OK;
 }
 
-// 全零过滤 + 100ms 限流 + MQTT 发布
+// 阈值过滤 + 100ms 限流 + MQTT 发布
 void sensor_publish_max_channel(const uint16_t *data)
 {
-    static uint8_t zero_count = 0;
     static uint32_t last_publish_ms = 0;
 
     sensor_peak_t peak = find_max_channel(data);
 
-    // 全零过滤：连续 >=3 次全零则跳过发布
-    if (peak.intensity == 0) {
-        zero_count++;
-    } else {
-        zero_count = 0;
-    }
-    if (zero_count >= 3) {
-        return;
-    }
+    if (peak.intensity < 20) return;
 
     // 100ms 限流
     uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -107,23 +98,23 @@ static void onenet_property_handle(cJSON *property)
         }
     }
 
-    // 解析 max_channel
-    cJSON *ch = cJSON_GetObjectItem(params, "max_channel");
+    // 解析 max_tx_idx
+    cJSON *ch = cJSON_GetObjectItem(params, "max_tx_idx");
     if (ch) {
         cJSON *ch_val = cJSON_GetObjectItem(ch, "value");
         if (ch_val) {
             int channel = (int)cJSON_GetNumberValue(ch_val);
-            ESP_LOGI(TAG, "Received max_channel: %d", channel);
+            ESP_LOGI(TAG, "Received max_tx_idx: %d", channel);
         }
     }
 
-    // 解析 max_value
-    cJSON *val = cJSON_GetObjectItem(params, "max_value");
+    // 解析 max_tx_value
+    cJSON *val = cJSON_GetObjectItem(params, "max_tx_value");
     if (val) {
         cJSON *val_val = cJSON_GetObjectItem(val, "value");
         if (val_val) {
             int value = (int)cJSON_GetNumberValue(val_val);
-            ESP_LOGI(TAG, "Received max_value: %d", value);
+            ESP_LOGI(TAG, "Received max_tx_value: %d", value);
         }
     }
 }
