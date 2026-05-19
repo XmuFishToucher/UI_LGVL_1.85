@@ -59,16 +59,6 @@ static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
     cJSON_Delete(root);
     cJSON_free(data);
 
-    // ===== 自定义 Topic (发给 Device B，简化 JSON) =====
-    cJSON *direct = cJSON_CreateObject();
-    cJSON_AddNumberToObject(direct, "max_tx_idx", channel);
-    cJSON_AddNumberToObject(direct, "max_tx_value", value);
-    char *direct_data = cJSON_PrintUnformatted(direct);
-    esp_mqtt_client_publish(hqtt_handle, CUSTOM_TOPIC, direct_data, strlen(direct_data), 1, 0);
-    ESP_LOGI(TAG, "Direct: %s -> %s", CUSTOM_TOPIC, direct_data);
-    cJSON_Delete(direct);
-    cJSON_free(direct_data);
-
     return ESP_OK;
 }
 

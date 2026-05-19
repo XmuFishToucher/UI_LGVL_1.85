@@ -8,9 +8,6 @@
 #define ONENET_PRODUCT_ACCESS_KEY "UycLzekhG0HPmcMDzS03H/PB8QtHzRX9jdk/h4EdUxk="
 #define ONENET_DEVICE_NAME "device_A"
 
-// 自定义 Topic: Device A → Device B 直通
-#define CUSTOM_TOPIC "8x5w9DD3Av/interaction"
-
 // 传感器最大值结构体
 typedef struct {
     uint8_t  channel;    // 0-46
