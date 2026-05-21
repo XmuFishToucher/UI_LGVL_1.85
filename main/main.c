@@ -26,7 +26,20 @@ static uint16_t g_matrix_data[TOTAL_POINTS];
 void matrix_update_from_mqtt(uint8_t ch, uint16_t val)
 {
     if (ch >= TOTAL_POINTS) return;
+    if (val == 0) {
+        matrix_clear_from_mqtt();
+        return;
+    }
+
     g_matrix_data[ch] = val;
+    lvgl_port_lock(0);
+    ui_matrix_update(g_matrix_data);
+    lvgl_port_unlock();
+}
+
+void matrix_clear_from_mqtt(void)
+{
+    memset(g_matrix_data, 0, sizeof(g_matrix_data));
     lvgl_port_lock(0);
     ui_matrix_update(g_matrix_data);
     lvgl_port_unlock();

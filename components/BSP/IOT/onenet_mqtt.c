@@ -8,8 +8,11 @@
 #include "cJSON.h"
 
 #define TAG "onenet_mqtt"
+#define MQTT_SIGNAL_TIMEOUT_MS 1000
 
 static esp_mqtt_client_handle_t hqtt_handle = NULL;
+static volatile uint32_t last_signal_ms = 0;
+static volatile uint8_t matrix_is_active = 0;
 
 // ==================== 传感器数据处理 ====================
 
@@ -121,11 +124,32 @@ static void onenet_property_handle(cJSON *property)
     int channel = parse_property_number(params, "max_tx_idx");
     int value = parse_property_number(params, "max_tx_value");
 
-    if (channel >= 0 && channel < 47 && value >= 0) {
+    if (value == 0) {
+        ESP_LOGI(TAG, "Clear max data");
+        matrix_is_active = 0;
+        last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        matrix_clear_from_mqtt();
+    } else if (channel >= 0 && channel < 47 && value > 0) {
         ESP_LOGI(TAG, "Apply max data: channel=%d value=%d", channel, value);
+        matrix_is_active = 1;
+        last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         matrix_update_from_mqtt((uint8_t)channel, (uint16_t)value);
     } else {
         ESP_LOGW(TAG, "Ignore invalid max data: channel=%d value=%d", channel, value);
+    }
+}
+
+static void mqtt_signal_timeout_task(void *arg)
+{
+    while (1) {
+        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        if (matrix_is_active && last_signal_ms != 0 && now - last_signal_ms > MQTT_SIGNAL_TIMEOUT_MS) {
+            ESP_LOGW(TAG, "Signal timeout, clear matrix");
+            matrix_is_active = 0;
+            matrix_clear_from_mqtt();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -229,5 +253,6 @@ esp_err_t onenet_start(void)
 
     hqtt_handle = esp_mqtt_client_init(&mqtt_config);
     esp_mqtt_client_register_event(hqtt_handle, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+    xTaskCreate(mqtt_signal_timeout_task, "mqtt_signal_timeout", 2048, NULL, 4, NULL);
     return esp_mqtt_client_start(hqtt_handle);
 }
