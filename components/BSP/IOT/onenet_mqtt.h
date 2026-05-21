@@ -20,7 +20,7 @@ esp_err_t onenet_start(void);
 // 找 47 通道中的最大值
 sensor_peak_t find_max_channel(const uint16_t *data);
 
-// 找最大值 + 全零过滤 + 100ms 限流 + MQTT 发布 (在 uart_task 中调用)
+// 找最大值 + 阈值过滤 + 100ms 限流 + MQTT 发布；信号结束时清零一次
 void sensor_publish_max_channel(const uint16_t *data);
 
 #endif

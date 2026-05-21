@@ -8,6 +8,10 @@
 #include "cJSON.h"
 
 #define TAG "onenet_mqtt"
+#define SENSOR_SIGNAL_ON_THRESHOLD 20
+#define SENSOR_SIGNAL_OFF_THRESHOLD 15
+#define SENSOR_SIGNAL_OFF_CONFIRM_COUNT 3
+#define SENSOR_PUBLISH_INTERVAL_MS 100
 
 static esp_mqtt_client_handle_t hqtt_handle = NULL;
 
@@ -62,18 +66,50 @@ static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
     return ESP_OK;
 }
 
-// 阈值过滤 + 100ms 限流 + MQTT 发布
+// 阈值过滤 + 100ms 限流 + MQTT 发布；信号停止后只发送一次清零
 void sensor_publish_max_channel(const uint16_t *data)
 {
     static uint32_t last_publish_ms = 0;
+    static uint8_t signal_active = 0;
+    static uint8_t off_confirm_count = 0;
 
     sensor_peak_t peak = find_max_channel(data);
+    uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
-    if (peak.intensity < 20) return;
+    if (!signal_active) {
+        if (peak.intensity < SENSOR_SIGNAL_ON_THRESHOLD) {
+            return;
+        }
+
+        signal_active = 1;
+        off_confirm_count = 0;
+        last_publish_ms = now;
+        ESP_LOGI(TAG, "Signal active: channel=%d value=%d", peak.channel, peak.intensity);
+        onenet_post_max_data(peak.channel, peak.intensity);
+        return;
+    }
+
+    if (peak.intensity <= SENSOR_SIGNAL_OFF_THRESHOLD) {
+        if (off_confirm_count < SENSOR_SIGNAL_OFF_CONFIRM_COUNT) {
+            off_confirm_count++;
+        }
+
+        if (off_confirm_count >= SENSOR_SIGNAL_OFF_CONFIRM_COUNT) {
+            signal_active = 0;
+            off_confirm_count = 0;
+            last_publish_ms = now;
+            ESP_LOGI(TAG, "Signal cleared");
+            onenet_post_max_data(0, 0);
+            return;
+        }
+
+        return;
+    } else {
+        off_confirm_count = 0;
+    }
 
     // 100ms 限流
-    uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
-    if (now - last_publish_ms < 100) {
+    if (now - last_publish_ms < SENSOR_PUBLISH_INTERVAL_MS) {
         return;
     }
     last_publish_ms = now;

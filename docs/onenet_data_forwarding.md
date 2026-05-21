@@ -47,6 +47,25 @@ max_tx_idx = 最大值通道号
 max_tx_value = 最大值强度
 ```
 
+- 当前发送时序：
+
+```text
+最大值 < 20：
+  无信号，保持静默，不发送。
+
+第一次最大值 >= 20：
+  进入 active，立即发送一次当前最大通道和强度。
+
+active 状态下最大值 > 15：
+  按 100ms 节流持续发送当前最大通道和强度。
+
+active 状态下最大值 <= 15：
+  只累计关闭确认次数，不发送低值过渡帧。
+  连续 3 次确认后发送一次 max_tx_idx=0, max_tx_value=0，然后回到静默。
+```
+
+也就是说，信号停止时只发送一次清零；后续连续无信号不会继续发送 `{0,0}`。
+
 ### deviceB / device_B
 
 提交：
@@ -172,6 +191,33 @@ https://<cpolar-domain>/onenet/forward
 DRY-RUN set device_B: {"product_id":"8x5w9DD3Av","device_name":"device_B","params":{"source_id":"device_A","max_tx_idx":46,"max_tx_value":218}}
 ```
 
+当前脚本已包含以下保护逻辑：
+
+- 支持解析 OneNET 外层 `msg` 字符串包裹的推送体。
+- 只转发 `source_id == device_A` 的数据。
+- active 数据按 `FORWARD_ACTIVE_MIN_MS` 节流，默认 `100ms`。
+- 清零数据按状态机处理：空闲时收到 `{0,0}` 会跳过；active 后收到第一条 `{0,0}` 才转发清零。
+- 按 OneNET 属性 `time` 过滤乱序或重复消息；相同或更旧的 payload 不会再次转发。
+- 启动时默认丢弃早于启动时间 `5000ms` 以上的历史消息，避免 OneNET 回放旧通知。
+- 默认不打印 skip 和 HTTP access 日志，只打印真正转发和 OneNET set 响应。
+
+常用环境变量：
+
+```cmd
+set "FORWARD_ACTIVE_MIN_MS=100"
+set "FORWARD_CLEAR_MIN_MS=1000"
+set "FORWARD_ACCEPT_PAST_MS=5000"
+set "FORWARD_LOG_SKIPS=0"
+set "FORWARD_LOG_REQUESTS=0"
+```
+
+如果需要调试被跳过的重复包或历史包，可以临时设置：
+
+```cmd
+set "FORWARD_LOG_SKIPS=1"
+set "FORWARD_LOG_REQUESTS=1"
+```
+
 ## OneNET 设置设备属性 API
 
 从 OneNET API 调试页面确认到的接口：
@@ -240,7 +286,11 @@ cd /d D:\Documents\ESP_Projects\UI_LGVL_1.85
 设置 OneNET HTTP 推送校验 token：
 
 ```cmd
-set FORWARD_SHARED_TOKEN=deviceA2B2026
+set "FORWARD_SHARED_TOKEN=deviceA2B2026"
+set "FORWARD_REQUIRE_POST_TOKEN=0"
+set "FORWARD_ACTIVE_MIN_MS=100"
+set "FORWARD_CLEAR_MIN_MS=1000"
+set "FORWARD_ACCEPT_PAST_MS=5000"
 ```
 
 如果只是验证 OneNET 能不能推到本地服务，可以不设置 OneNET 属性设置 API，此时脚本会进入 dry-run 模式：
@@ -259,13 +309,13 @@ ONENET_SET_PROPERTY_URL is not set; running in dry-run mode
 如果要真正下发到 `device_B`，需要设置 OneNET API 地址和鉴权 token 后再启动：
 
 ```cmd
-set ONENET_SET_PROPERTY_URL=https://iot-api.heclouds.com/thingmodel/set-device-property
-set ONENET_AUTH_HEADER_NAME=authorization
-set ONENET_AUTH_HEADER_VALUE=<从OneNET API调试页复制的authorization>
+set "ONENET_SET_PROPERTY_URL=https://iot-api.heclouds.com/thingmodel/set-device-property"
+set "ONENET_AUTH_HEADER_NAME=authorization"
+set "ONENET_AUTH_HEADER_VALUE=<从OneNET API调试页复制的authorization>"
 python tools\onenet_forward_server.py
 ```
 
-注意：`ONENET_AUTH_HEADER_VALUE` 里的 token 有过期时间，过期后需要重新从 OneNET API 调试页复制。
+注意：`ONENET_AUTH_HEADER_VALUE` 里的 token 有过期时间，过期后需要重新从 OneNET API 调试页复制。Windows CMD 中必须使用 `set "NAME=value"` 形式，因为 authorization 里通常包含 `&`。
 
 ### 2. 启动 cpolar 内网穿透
 
@@ -359,6 +409,7 @@ Python 窗口应看到 OneNET 推送内容：
 
 ```text
 push payload: ...
+OneNET set response status=200 body=...
 ```
 
 dry-run 模式下应看到：
@@ -418,11 +469,20 @@ Apply max data: channel=46 value=218
 - 检查 `ONENET_AUTH_HEADER_VALUE` 是否过期。
 - 先在 OneNET API 调试页手动调用“设置设备属性”，确认 API 本身可用。
 
+如果本地服务刚启动就收到一批旧数据：
+
+- 这是 OneNET 对历史通知的回放或重试。
+- 脚本默认用 `FORWARD_ACCEPT_PAST_MS=5000` 过滤启动前过旧的 payload。
+- 如果希望更严格，可以设置 `set "FORWARD_ACCEPT_PAST_MS=0"` 后重启本地服务。
+
+如果看到重复的同一条推送：
+
+- 以 OneNET payload 内的属性 `time` 为准。
+- 相同或更旧的 `time` 会被本地脚本跳过，不会重复下发给 `device_B`。
+- 如需观察跳过原因，设置 `FORWARD_LOG_SKIPS=1`。
+
 ## 后续待解决问题
 
-- 短时间内可能收到很多重复 POST。真正更新 `device_B` 前需要增加去重或节流。
-- `device_A` 当前上报频率偏高，后续需要调整发布间隔和阈值。
 - 本地转发服务依赖 cpolar 和本地电脑，适合开发调试，不适合作为最终部署方案。
 - 免费 cpolar 域名重启后会变化，需要手动更新 OneNET HTTP 推送 URL。
 - OneNET `authorization` token 会过期，需要刷新。
-- 最终上线前，需要用真实转发再次确认 OneNET API 请求体和请求头格式，而不只依赖 API 调试结果。
