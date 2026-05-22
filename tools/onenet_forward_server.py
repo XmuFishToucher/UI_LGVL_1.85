@@ -18,8 +18,16 @@ Useful environment variables:
   FORWARD_HOST                 default: 127.0.0.1
   FORWARD_PORT                 default: 3000
   FORWARD_SHARED_TOKEN         optional token checked against query/header/body
+  FORWARD_REQUIRE_POST_TOKEN   default: 0; set to 1 to require token on POST
+  FORWARD_ACTIVE_MIN_MS        default: 100; minimum interval for non-zero forwards
+  FORWARD_CLEAR_MIN_MS         default: 1000; minimum interval for clear forwards
+  FORWARD_ACCEPT_PAST_MS       default: 5000; accept payloads this old at startup
+  FORWARD_LOG_SKIPS            default: 0; set to 1 to log skipped duplicate/idle pushes
+  FORWARD_LOG_REQUESTS         default: 0; set to 1 to log every HTTP request
+  FORWARD_LOG_DISCONNECTS      default: 0; set to 1 to log client disconnects
   TARGET_DEVICE_NAME           default: device_B
   EXPECTED_SOURCE_ID           default: device_A
+  ONENET_PRODUCT_ID            default: 8x5w9DD3Av
 
   ONENET_SET_PROPERTY_URL      required to really call OneNET; otherwise dry-run
   ONENET_AUTH_HEADER_NAME      default: authorization
@@ -28,6 +36,7 @@ Useful environment variables:
 
 Default OneNET request body template:
   {
+    "product_id": "{product_id}",
     "device_name": "{target_device}",
     "params": {
       "source_id": "{source_id}",
@@ -44,7 +53,9 @@ import base64
 import hashlib
 import json
 import os
+import socket
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -59,7 +70,22 @@ PATH = "/onenet/forward"
 
 TARGET_DEVICE_NAME = os.getenv("TARGET_DEVICE_NAME", "device_B")
 EXPECTED_SOURCE_ID = os.getenv("EXPECTED_SOURCE_ID", "device_A")
+ONENET_PRODUCT_ID = os.getenv("ONENET_PRODUCT_ID", "8x5w9DD3Av")
 SHARED_TOKEN = os.getenv("FORWARD_SHARED_TOKEN", "")
+REQUIRE_POST_TOKEN = os.getenv("FORWARD_REQUIRE_POST_TOKEN", "0") == "1"
+ACTIVE_FORWARD_MIN_MS = int(os.getenv("FORWARD_ACTIVE_MIN_MS", "100"))
+CLEAR_FORWARD_MIN_MS = int(os.getenv("FORWARD_CLEAR_MIN_MS", "1000"))
+ACCEPT_PAST_MS = int(os.getenv("FORWARD_ACCEPT_PAST_MS", "5000"))
+LOG_SKIPS = os.getenv("FORWARD_LOG_SKIPS", "0") == "1"
+LOG_REQUESTS = os.getenv("FORWARD_LOG_REQUESTS", "0") == "1"
+LOG_DISCONNECTS = os.getenv("FORWARD_LOG_DISCONNECTS", "0") == "1"
+START_TIME_MS = int(time.time() * 1000)
+
+last_forward_key: tuple[str, int, int] | None = None
+last_forward_ms = 0
+last_payload_time = 0
+forward_signal_active = False
+forward_lock = threading.Lock()
 
 ONENET_SET_PROPERTY_URL = os.getenv("ONENET_SET_PROPERTY_URL", "")
 ONENET_AUTH_HEADER_NAME = os.getenv("ONENET_AUTH_HEADER_NAME", "authorization")
@@ -68,6 +94,7 @@ ONENET_SET_PROPERTY_BODY = os.getenv(
     "ONENET_SET_PROPERTY_BODY",
     json.dumps(
         {
+            "product_id": "{product_id}",
             "device_name": "{target_device}",
             "params": {
                 "source_id": "{source_id}",
@@ -101,6 +128,7 @@ def unwrap_value(value: Any) -> Any:
 
 
 def find_params(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = normalize_push_payload(payload)
     candidates = [
         get_nested(payload, "data", "params"),
         get_nested(payload, "params"),
@@ -116,7 +144,20 @@ def find_params(payload: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def normalize_push_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    msg = payload.get("msg")
+    if isinstance(msg, str):
+        try:
+            parsed = json.loads(msg)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            return payload
+    return payload
+
+
 def extract_forward_data(payload: dict[str, Any]) -> tuple[str, int, int]:
+    payload = normalize_push_payload(payload)
     params = find_params(payload)
 
     source_id = unwrap_value(params.get("source_id"))
@@ -140,6 +181,28 @@ def extract_forward_data(payload: dict[str, Any]) -> tuple[str, int, int]:
     return str(source_id), int(max_tx_idx), int(max_tx_value)
 
 
+def extract_payload_time(payload: dict[str, Any]) -> int:
+    payload = normalize_push_payload(payload)
+    params = find_params(payload)
+
+    times = []
+    for key in ("source_id", "max_tx_idx", "max_tx_value"):
+        item = params.get(key)
+        if isinstance(item, dict) and "time" in item:
+            try:
+                times.append(int(item["time"]))
+            except (TypeError, ValueError):
+                pass
+
+    if times:
+        return max(times)
+
+    try:
+        return int(payload.get("time", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def render_body(source_id: str, max_tx_idx: int, max_tx_value: int) -> bytes:
     body = (
         ONENET_SET_PROPERTY_BODY
@@ -147,6 +210,7 @@ def render_body(source_id: str, max_tx_idx: int, max_tx_value: int) -> bytes:
         .replace("{max_tx_idx}", str(max_tx_idx))
         .replace("{max_tx_value}", str(max_tx_value))
         .replace("{target_device}", TARGET_DEVICE_NAME)
+        .replace("{product_id}", ONENET_PRODUCT_ID)
     )
     data = json.loads(body)
 
@@ -162,6 +226,37 @@ def render_body(source_id: str, max_tx_idx: int, max_tx_value: int) -> bytes:
         return value
 
     return json.dumps(normalize_numbers(data), separators=(",", ":")).encode("utf-8")
+
+
+def should_forward(source_id: str, max_tx_idx: int, max_tx_value: int, payload_time: int) -> bool:
+    global last_forward_key, last_forward_ms, last_payload_time, forward_signal_active
+
+    now_ms = int(time.monotonic() * 1000)
+    key = (source_id, max_tx_idx, max_tx_value)
+    min_interval = CLEAR_FORWARD_MIN_MS if max_tx_value == 0 else ACTIVE_FORWARD_MIN_MS
+
+    with forward_lock:
+        if payload_time and payload_time < START_TIME_MS - ACCEPT_PAST_MS:
+            return False
+
+        if payload_time and last_payload_time and payload_time <= last_payload_time:
+            return False
+
+        if max_tx_value == 0 and not forward_signal_active:
+            return False
+
+        if forward_signal_active and now_ms - last_forward_ms < min_interval:
+            return False
+
+        if last_forward_key == key and now_ms - last_forward_ms < min_interval:
+            return False
+
+        last_forward_key = key
+        last_forward_ms = now_ms
+        if payload_time:
+            last_payload_time = payload_time
+        forward_signal_active = max_tx_value != 0
+        return True
 
 
 def call_onenet(source_id: str, max_tx_idx: int, max_tx_value: int) -> tuple[int, str]:
@@ -184,9 +279,11 @@ def call_onenet(source_id: str, max_tx_idx: int, max_tx_value: int) -> tuple[int
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             text = resp.read().decode("utf-8", errors="replace")
+            log(f"OneNET set response status={resp.status} body={text}")
             return resp.status, text
     except urllib.error.HTTPError as exc:
         text = exc.read().decode("utf-8", errors="replace")
+        log(f"OneNET set HTTPError status={exc.code} body={text}")
         return exc.code, text
 
 
@@ -239,21 +336,30 @@ class ForwardHandler(BaseHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": f"invalid json: {exc}"})
             return
 
-        if SHARED_TOKEN and not self.token_matches(query, payload):
+        if SHARED_TOKEN and REQUIRE_POST_TOKEN and not self.token_matches(query, payload):
             self.send_json(401, {"ok": False, "error": "bad token"})
             return
 
-        log(f"push payload: {json.dumps(payload, ensure_ascii=False)}")
-
         try:
             source_id, max_tx_idx, max_tx_value = extract_forward_data(payload)
+            payload_time = extract_payload_time(payload)
             if source_id != EXPECTED_SOURCE_ID:
                 self.send_json(200, {"ok": True, "ignored": f"source_id={source_id}"})
                 return
 
+            if not should_forward(source_id, max_tx_idx, max_tx_value, payload_time):
+                if LOG_SKIPS:
+                    log(f"skip payload: source_id={source_id} max_tx_idx={max_tx_idx} max_tx_value={max_tx_value} time={payload_time}")
+                self.send_json(200, {"ok": True, "skipped": "throttled duplicate"})
+                return
+
+            log(f"push payload: {json.dumps(payload, ensure_ascii=False)}")
             status, response = call_onenet(source_id, max_tx_idx, max_tx_value)
             ok = 200 <= status < 300
             self.send_json(status if ok else 502, {"ok": ok, "onenet_status": status, "response": response})
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, socket.timeout) as exc:
+            if LOG_DISCONNECTS:
+                log(f"client disconnected before response was sent: {exc}")
         except Exception as exc:  # noqa: BLE001 - small ops script, return error to caller.
             log(f"error: {exc}")
             self.send_json(400, {"ok": False, "error": str(exc)})
@@ -275,7 +381,11 @@ class ForwardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, socket.timeout) as exc:
+            if LOG_DISCONNECTS:
+                log(f"client disconnected while writing json response: {exc}")
 
     def send_text(self, status: int, text: str) -> None:
         body = text.encode("utf-8")
@@ -283,10 +393,15 @@ class ForwardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, socket.timeout) as exc:
+            if LOG_DISCONNECTS:
+                log(f"client disconnected while writing text response: {exc}")
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        log(f"{self.client_address[0]} {fmt % args}")
+        if LOG_REQUESTS:
+            log(f"{self.client_address[0]} {fmt % args}")
 
 
 def parse_args() -> argparse.Namespace:

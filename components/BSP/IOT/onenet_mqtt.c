@@ -253,6 +253,9 @@ esp_err_t onenet_start(void)
 
     hqtt_handle = esp_mqtt_client_init(&mqtt_config);
     esp_mqtt_client_register_event(hqtt_handle, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-    xTaskCreate(mqtt_signal_timeout_task, "mqtt_signal_timeout", 2048, NULL, 4, NULL);
+    BaseType_t task_ret = xTaskCreate(mqtt_signal_timeout_task, "mqtt_signal_timeout", 6144, NULL, 4, NULL);
+    if (task_ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create mqtt_signal_timeout task: %d", task_ret);
+    }
     return esp_mqtt_client_start(hqtt_handle);
 }
