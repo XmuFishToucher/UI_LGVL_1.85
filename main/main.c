@@ -11,6 +11,7 @@
 #include "ST77916.h"
 #include "lvgl_ui.h"
 #include "ui_matrix.h"
+#include "uart.h"
 
 #include "wifi_manager.h"
 #include "onenet_mqtt.h"
@@ -84,6 +85,9 @@ void app_main(void)
         ESP_LOGE(TAG, "LVGL UI initialization failed: %d", ret);
         return;
     }
+
+    ESP_LOGI(TAG, "Initializing UART output...");
+    uart_init_custom();
 
     wifi_ev = xEventGroupCreate();
     wifi_manager_init(wifi_state_cb);

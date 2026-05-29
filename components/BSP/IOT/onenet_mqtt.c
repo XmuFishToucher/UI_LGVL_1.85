@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "cJSON.h"
+#include "uart.h"
 
 #define TAG "onenet_mqtt"
 #define MQTT_SIGNAL_TIMEOUT_MS 1000
@@ -13,6 +14,22 @@
 static esp_mqtt_client_handle_t hqtt_handle = NULL;
 static volatile uint32_t last_signal_ms = 0;
 static volatile uint8_t matrix_is_active = 0;
+
+static void uart_forward_max_data(uint8_t max_tx_idx, uint16_t max_tx_value)
+{
+    uint8_t tx_buf[6];
+    tx_buf[0] = max_tx_idx;
+    tx_buf[1] = (uint8_t)(max_tx_value & 0xFF);
+    tx_buf[2] = (uint8_t)((max_tx_value >> 8) & 0xFF);
+    tx_buf[3] = tx_buf[0] + tx_buf[1] + tx_buf[2];
+    tx_buf[4] = 0x0D;
+    tx_buf[5] = 0x0A;
+
+    int written = uart_send_data(tx_buf, sizeof(tx_buf));
+    if (written != (int)sizeof(tx_buf)) {
+        ESP_LOGW(TAG, "UART forward incomplete: written=%d expected=%d", written, (int)sizeof(tx_buf));
+    }
+}
 
 // ==================== 传感器数据处理 ====================
 
@@ -129,11 +146,13 @@ static void onenet_property_handle(cJSON *property)
         matrix_is_active = 0;
         last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         matrix_clear_from_mqtt();
+        uart_forward_max_data(0, 0);
     } else if (channel >= 0 && channel < 47 && value > 0) {
         ESP_LOGI(TAG, "Apply max data: channel=%d value=%d", channel, value);
         matrix_is_active = 1;
         last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         matrix_update_from_mqtt((uint8_t)channel, (uint16_t)value);
+        uart_forward_max_data((uint8_t)channel, (uint16_t)value);
     } else {
         ESP_LOGW(TAG, "Ignore invalid max data: channel=%d value=%d", channel, value);
     }
@@ -147,6 +166,7 @@ static void mqtt_signal_timeout_task(void *arg)
             ESP_LOGW(TAG, "Signal timeout, clear matrix");
             matrix_is_active = 0;
             matrix_clear_from_mqtt();
+            uart_forward_max_data(0, 0);
         }
 
         vTaskDelay(pdMS_TO_TICKS(100));
