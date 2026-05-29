@@ -29,8 +29,8 @@ static int rx_len = 0;
 
 static uint16_t matrix_data[TOTAL_POINTS];
 
-#define ssid "eeg"
-#define password "zhangxu123"
+#define ssid "RMYiPhone"
+#define password "Rmy20020123"
 
 static EventGroupHandle_t wifi_ev = NULL;
 #define WIFI_CONNECTED_BIT BIT0
