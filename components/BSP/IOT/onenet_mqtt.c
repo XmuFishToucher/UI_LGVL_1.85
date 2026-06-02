@@ -12,8 +12,10 @@
 #define SENSOR_SIGNAL_OFF_THRESHOLD 15
 #define SENSOR_SIGNAL_OFF_CONFIRM_COUNT 3
 #define SENSOR_PUBLISH_INTERVAL_MS 100
+#define SENSOR_MATRIX_POINTS 47
 
 static esp_mqtt_client_handle_t hqtt_handle = NULL;
+static uint32_t sensor_frame_id = 0;
 
 // ==================== 传感器数据处理 ====================
 
@@ -29,7 +31,7 @@ sensor_peak_t find_max_channel(const uint16_t *data)
     return peak;
 }
 
-static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
+static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value, const uint16_t *matrix_data)
 {
     if (!hqtt_handle) return ESP_FAIL;
 
@@ -47,6 +49,10 @@ static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
     cJSON_AddStringToObject(src, "value", ONENET_DEVICE_NAME);
     cJSON_AddItemToObject(params, "source_id", src);
 
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddNumberToObject(frame, "value", ++sensor_frame_id);
+    cJSON_AddItemToObject(params, "frame_id", frame);
+
     cJSON *ch = cJSON_CreateObject();
     cJSON_AddNumberToObject(ch, "value", channel);
     cJSON_AddItemToObject(params, "max_tx_idx", ch);
@@ -54,6 +60,15 @@ static esp_err_t onenet_post_max_data(uint8_t channel, uint16_t value)
     cJSON *val = cJSON_CreateObject();
     cJSON_AddNumberToObject(val, "value", value);
     cJSON_AddItemToObject(params, "max_tx_value", val);
+
+    cJSON *matrix = cJSON_CreateObject();
+    cJSON *matrix_values = cJSON_CreateArray();
+    for (int i = 0; i < SENSOR_MATRIX_POINTS; i++) {
+        uint16_t point_value = (matrix_data && value > 0) ? matrix_data[i] : 0;
+        cJSON_AddItemToArray(matrix_values, cJSON_CreateNumber(point_value));
+    }
+    cJSON_AddItemToObject(matrix, "value", matrix_values);
+    cJSON_AddItemToObject(params, "matrix_data", matrix);
 
     cJSON_AddItemToObject(root, "params", params);
 
@@ -85,7 +100,7 @@ void sensor_publish_max_channel(const uint16_t *data)
         off_confirm_count = 0;
         last_publish_ms = now;
         ESP_LOGI(TAG, "Signal active: channel=%d value=%d", peak.channel, peak.intensity);
-        onenet_post_max_data(peak.channel, peak.intensity);
+        onenet_post_max_data(peak.channel, peak.intensity, data);
         return;
     }
 
@@ -99,7 +114,7 @@ void sensor_publish_max_channel(const uint16_t *data)
             off_confirm_count = 0;
             last_publish_ms = now;
             ESP_LOGI(TAG, "Signal cleared");
-            onenet_post_max_data(0, 0);
+            onenet_post_max_data(0, 0, NULL);
             return;
         }
 
@@ -114,7 +129,7 @@ void sensor_publish_max_channel(const uint16_t *data)
     }
     last_publish_ms = now;
 
-    onenet_post_max_data(peak.channel, peak.intensity);
+    onenet_post_max_data(peak.channel, peak.intensity, data);
 }
 
 // ==================== 属性处理 (接收对端数据) ====================
