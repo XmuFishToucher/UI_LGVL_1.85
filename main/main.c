@@ -46,8 +46,8 @@ void matrix_clear_from_mqtt(void)
     lvgl_port_unlock();
 }
 
-#define ssid "eeg"
-#define password "zhangxu123"
+#define ssid "RMYiPhone"//eeg
+#define password "Rmy20020123"//zhangxu123
 
 static EventGroupHandle_t wifi_ev = NULL;
 #define WIFI_CONNECTED_BIT BIT0
