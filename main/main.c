@@ -38,6 +38,16 @@ void matrix_update_from_mqtt(uint8_t ch, uint16_t val)
     lvgl_port_unlock();
 }
 
+void matrix_update_all_from_mqtt(const uint16_t *data)
+{
+    if (!data) return;
+
+    memcpy(g_matrix_data, data, sizeof(g_matrix_data));
+    lvgl_port_lock(0);
+    ui_matrix_update(g_matrix_data);
+    lvgl_port_unlock();
+}
+
 void matrix_clear_from_mqtt(void)
 {
     memset(g_matrix_data, 0, sizeof(g_matrix_data));

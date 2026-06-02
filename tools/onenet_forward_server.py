@@ -203,7 +203,33 @@ def extract_payload_time(payload: dict[str, Any]) -> int:
         return 0
 
 
-def render_body(source_id: str, max_tx_idx: int, max_tx_value: int) -> bytes:
+def extract_optional_property(payload: dict[str, Any], key: str) -> Any:
+    payload = normalize_push_payload(payload)
+    params = find_params(payload)
+    return unwrap_value(params.get(key))
+
+
+def normalize_matrix_data(value: Any) -> list[int] | None:
+    if not isinstance(value, list) or len(value) != 47:
+        return None
+
+    matrix = []
+    for item in value:
+        try:
+            point = int(item)
+        except (TypeError, ValueError):
+            return None
+        matrix.append(max(0, min(65535, point)))
+    return matrix
+
+
+def render_body(
+    source_id: str,
+    max_tx_idx: int,
+    max_tx_value: int,
+    frame_id: int | None = None,
+    matrix_data: list[int] | None = None,
+) -> bytes:
     body = (
         ONENET_SET_PROPERTY_BODY
         .replace("{source_id}", source_id)
@@ -225,7 +251,14 @@ def render_body(source_id: str, max_tx_idx: int, max_tx_value: int) -> bytes:
             return max_tx_value
         return value
 
-    return json.dumps(normalize_numbers(data), separators=(",", ":")).encode("utf-8")
+    data = normalize_numbers(data)
+    params = data.setdefault("params", {})
+    if frame_id is not None:
+        params["frame_id"] = frame_id
+    if matrix_data is not None:
+        params["matrix_data"] = matrix_data
+
+    return json.dumps(data, separators=(",", ":")).encode("utf-8")
 
 
 def should_forward(source_id: str, max_tx_idx: int, max_tx_value: int, payload_time: int) -> bool:
@@ -259,8 +292,14 @@ def should_forward(source_id: str, max_tx_idx: int, max_tx_value: int, payload_t
         return True
 
 
-def call_onenet(source_id: str, max_tx_idx: int, max_tx_value: int) -> tuple[int, str]:
-    body = render_body(source_id, max_tx_idx, max_tx_value)
+def call_onenet(
+    source_id: str,
+    max_tx_idx: int,
+    max_tx_value: int,
+    frame_id: int | None = None,
+    matrix_data: list[int] | None = None,
+) -> tuple[int, str]:
+    body = render_body(source_id, max_tx_idx, max_tx_value, frame_id, matrix_data)
 
     if not ONENET_SET_PROPERTY_URL:
         log(f"DRY-RUN set {TARGET_DEVICE_NAME}: {body.decode('utf-8')}")
@@ -343,6 +382,9 @@ class ForwardHandler(BaseHTTPRequestHandler):
         try:
             source_id, max_tx_idx, max_tx_value = extract_forward_data(payload)
             payload_time = extract_payload_time(payload)
+            frame_id_raw = extract_optional_property(payload, "frame_id")
+            matrix_data = normalize_matrix_data(extract_optional_property(payload, "matrix_data"))
+            frame_id = int(frame_id_raw) if frame_id_raw is not None else None
             if source_id != EXPECTED_SOURCE_ID:
                 self.send_json(200, {"ok": True, "ignored": f"source_id={source_id}"})
                 return
@@ -354,7 +396,7 @@ class ForwardHandler(BaseHTTPRequestHandler):
                 return
 
             log(f"push payload: {json.dumps(payload, ensure_ascii=False)}")
-            status, response = call_onenet(source_id, max_tx_idx, max_tx_value)
+            status, response = call_onenet(source_id, max_tx_idx, max_tx_value, frame_id, matrix_data)
             ok = 200 <= status < 300
             self.send_json(status if ok else 502, {"ok": ok, "onenet_status": status, "response": response})
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, socket.timeout) as exc:

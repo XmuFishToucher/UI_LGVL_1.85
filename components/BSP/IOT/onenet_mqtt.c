@@ -4,16 +4,19 @@
 #include "esp_log.h"
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include "cJSON.h"
 #include "uart.h"
 
 #define TAG "onenet_mqtt"
 #define MQTT_SIGNAL_TIMEOUT_MS 1000
+#define MATRIX_POINTS 47
 
 static esp_mqtt_client_handle_t hqtt_handle = NULL;
 static volatile uint32_t last_signal_ms = 0;
 static volatile uint8_t matrix_is_active = 0;
+static int last_frame_id = -1;
 
 static void uart_forward_max_data(uint8_t max_tx_idx, uint16_t max_tx_value)
 {
@@ -116,6 +119,37 @@ static int parse_property_number(cJSON *params, const char *key)
     return -1;
 }
 
+static cJSON *get_property_value(cJSON *params, const char *key)
+{
+    cJSON *item = cJSON_GetObjectItem(params, key);
+    if (!item) return NULL;
+
+    cJSON *value = cJSON_GetObjectItem(item, "value");
+    return value ? value : item;
+}
+
+static bool parse_matrix_data(cJSON *params, uint16_t *out)
+{
+    cJSON *array = get_property_value(params, "matrix_data");
+    if (!cJSON_IsArray(array) || cJSON_GetArraySize(array) != MATRIX_POINTS) {
+        return false;
+    }
+
+    for (int i = 0; i < MATRIX_POINTS; i++) {
+        cJSON *item = cJSON_GetArrayItem(array, i);
+        if (!cJSON_IsNumber(item)) {
+            return false;
+        }
+
+        int value = item->valueint;
+        if (value < 0) value = 0;
+        if (value > 65535) value = 65535;
+        out[i] = (uint16_t)value;
+    }
+
+    return true;
+}
+
 static void onenet_property_handle(cJSON *property)
 {
     cJSON *params = cJSON_GetObjectItem(property, "params");
@@ -140,6 +174,17 @@ static void onenet_property_handle(cJSON *property)
 
     int channel = parse_property_number(params, "max_tx_idx");
     int value = parse_property_number(params, "max_tx_value");
+    int frame_id = parse_property_number(params, "frame_id");
+    uint16_t matrix_data[MATRIX_POINTS];
+    bool has_matrix_data = parse_matrix_data(params, matrix_data);
+
+    if (frame_id >= 0) {
+        if (last_frame_id >= 0 && frame_id <= last_frame_id) {
+            ESP_LOGW(TAG, "Ignore stale frame_id: current=%d last=%d", frame_id, last_frame_id);
+            return;
+        }
+        last_frame_id = frame_id;
+    }
 
     if (value == 0) {
         ESP_LOGI(TAG, "Clear max data");
@@ -151,7 +196,11 @@ static void onenet_property_handle(cJSON *property)
         ESP_LOGI(TAG, "Apply max data: channel=%d value=%d", channel, value);
         matrix_is_active = 1;
         last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
-        matrix_update_from_mqtt((uint8_t)channel, (uint16_t)value);
+        if (has_matrix_data) {
+            matrix_update_all_from_mqtt(matrix_data);
+        } else {
+            matrix_update_from_mqtt((uint8_t)channel, (uint16_t)value);
+        }
         uart_forward_max_data((uint8_t)channel, (uint16_t)value);
     } else {
         ESP_LOGW(TAG, "Ignore invalid max data: channel=%d value=%d", channel, value);

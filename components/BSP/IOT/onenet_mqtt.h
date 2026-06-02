@@ -11,6 +11,7 @@
 
 // 矩阵单点更新 (由 main.c 实现, MQTT 收到数据后调用)
 void matrix_update_from_mqtt(uint8_t ch, uint16_t val);
+void matrix_update_all_from_mqtt(const uint16_t *data);
 void matrix_clear_from_mqtt(void);
 
 // 传感器最大值结构体
