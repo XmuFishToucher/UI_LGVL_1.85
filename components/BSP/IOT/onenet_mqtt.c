@@ -34,6 +34,32 @@ static void uart_forward_max_data(uint8_t max_tx_idx, uint16_t max_tx_value)
     }
 }
 
+static void uart_forward_matrix_data(const uint16_t *matrix_data)
+{
+    uint8_t tx_buf[2 + MATRIX_POINTS * 2 + 1 + 2];
+    uint8_t sum = 0;
+
+    tx_buf[0] = 0xAA;
+    tx_buf[1] = 0x55;
+
+    for (int i = 0; i < MATRIX_POINTS; i++) {
+        uint16_t value = matrix_data ? matrix_data[i] : 0;
+        tx_buf[2 + i * 2] = value & 0xFF;
+        tx_buf[2 + i * 2 + 1] = (value >> 8) & 0xFF;
+        sum += tx_buf[2 + i * 2];
+        sum += tx_buf[2 + i * 2 + 1];
+    }
+
+    tx_buf[2 + MATRIX_POINTS * 2] = sum;
+    tx_buf[3 + MATRIX_POINTS * 2] = 0x0D;
+    tx_buf[4 + MATRIX_POINTS * 2] = 0x0A;
+
+    int written = uart_send_data(tx_buf, sizeof(tx_buf));
+    if (written != (int)sizeof(tx_buf)) {
+        ESP_LOGW(TAG, "UART matrix forward incomplete: written=%d expected=%d", written, (int)sizeof(tx_buf));
+    }
+}
+
 // ==================== 传感器数据处理 ====================
 
 sensor_peak_t find_max_channel(const uint16_t *data)
@@ -191,17 +217,18 @@ static void onenet_property_handle(cJSON *property)
         matrix_is_active = 0;
         last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         matrix_clear_from_mqtt();
-        uart_forward_max_data(0, 0);
+        uart_forward_matrix_data(NULL);
     } else if (channel >= 0 && channel < 47 && value > 0) {
         ESP_LOGI(TAG, "Apply max data: channel=%d value=%d", channel, value);
         matrix_is_active = 1;
         last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         if (has_matrix_data) {
             matrix_update_all_from_mqtt(matrix_data);
+            uart_forward_matrix_data(matrix_data);
         } else {
             matrix_update_from_mqtt((uint8_t)channel, (uint16_t)value);
+            uart_forward_max_data((uint8_t)channel, (uint16_t)value);
         }
-        uart_forward_max_data((uint8_t)channel, (uint16_t)value);
     } else {
         ESP_LOGW(TAG, "Ignore invalid max data: channel=%d value=%d", channel, value);
     }
@@ -215,7 +242,7 @@ static void mqtt_signal_timeout_task(void *arg)
             ESP_LOGW(TAG, "Signal timeout, clear matrix");
             matrix_is_active = 0;
             matrix_clear_from_mqtt();
-            uart_forward_max_data(0, 0);
+            uart_forward_matrix_data(NULL);
         }
 
         vTaskDelay(pdMS_TO_TICKS(100));
