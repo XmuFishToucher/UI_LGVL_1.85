@@ -19,6 +19,12 @@ void ui_matrix_create(void);
  */
 void ui_matrix_update(uint16_t *cap);
 
+void ui_matrix_update_local(uint16_t *cap);
+
+void ui_matrix_update_remote(uint16_t *cap);
+
+void ui_matrix_clear_remote(void);
+
 #ifdef __cplusplus
 }
 #endif

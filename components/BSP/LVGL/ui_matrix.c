@@ -109,6 +109,7 @@ void ui_matrix_create(void)
 
         // 去边框
         lv_obj_set_style_border_width(obj, 0, 0);
+        lv_obj_set_style_border_opa(obj, LV_OPA_TRANSP, 0);
         lv_obj_set_style_shadow_width(obj, 0, 0);
         lv_obj_set_style_outline_width(obj, 0, 0);
         lv_obj_set_scrollbar_mode(obj, LV_SCROLLBAR_MODE_OFF);
@@ -165,21 +166,72 @@ static lv_color_t heatmap_color(uint8_t intensity)
 #define VALUE_MAX 80
 
 // ================== 更新阵点颜色 ==================
-void ui_matrix_update(uint16_t *cap)
+static lv_color_t remote_ring_color(uint8_t intensity)
+{
+    uint8_t r = (uint8_t)(80 + intensity * 175 / 255);
+    uint8_t g = (uint8_t)(40 + intensity * 80 / 255);
+    uint8_t b = 255;
+    return lv_color_make(r, g, b);
+}
+
+static uint8_t value_to_intensity(uint16_t val)
+{
+    if (val > VALUE_MAX)
+        return 255;
+
+    return val * 255 / VALUE_MAX;
+}
+
+void ui_matrix_update_local(uint16_t *cap)
 {
     for (int i = 0; i < TOTAL_POINTS; i++)
     {
         uint16_t val = cap[points[i].ch];
-        uint8_t intensity;
-
-        if (val > VALUE_MAX)
-            intensity = 255;
-        else
-            intensity = val * 255 / VALUE_MAX;
-
-        lv_color_t color = heatmap_color(intensity);
+        lv_color_t color = heatmap_color(value_to_intensity(val));
         lv_obj_set_style_bg_color(cells[i], color, 0);
     }
 
     lv_refr_now(NULL);
+}
+
+void ui_matrix_update_remote(uint16_t *cap)
+{
+    for (int i = 0; i < TOTAL_POINTS; i++)
+    {
+        uint16_t val = cap[points[i].ch];
+        uint8_t intensity = value_to_intensity(val);
+
+        if (intensity == 0)
+        {
+            lv_obj_set_style_border_width(cells[i], 0, 0);
+            lv_obj_set_style_border_opa(cells[i], LV_OPA_TRANSP, 0);
+            continue;
+        }
+
+        uint8_t width = 2 + intensity / 128;
+        if (intensity > 220)
+            width = 4;
+
+        lv_obj_set_style_border_width(cells[i], width, 0);
+        lv_obj_set_style_border_color(cells[i], remote_ring_color(intensity), 0);
+        lv_obj_set_style_border_opa(cells[i], LV_OPA_100, 0);
+    }
+
+    lv_refr_now(NULL);
+}
+
+void ui_matrix_clear_remote(void)
+{
+    for (int i = 0; i < TOTAL_POINTS; i++)
+    {
+        lv_obj_set_style_border_width(cells[i], 0, 0);
+        lv_obj_set_style_border_opa(cells[i], LV_OPA_TRANSP, 0);
+    }
+
+    lv_refr_now(NULL);
+}
+
+void ui_matrix_update(uint16_t *cap)
+{
+    ui_matrix_update_local(cap);
 }

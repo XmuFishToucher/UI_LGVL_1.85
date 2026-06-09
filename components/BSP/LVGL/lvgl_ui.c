@@ -2,6 +2,7 @@
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_lvgl_port.h"
+#include "lvgl.h"
 #include "ST77916.h"
 #include "CST816.h"
 #include "ui_matrix.h"
@@ -10,6 +11,28 @@ static const char *TAG = "LVGL_UI";
 
 static lv_display_t *lvgl_disp = NULL;
 static lv_indev_t *lvgl_touch_indev = NULL;
+
+extern void app_zero_calibrate(void);
+
+static void zero_btn_event_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        app_zero_calibrate();
+    }
+}
+
+static void create_zero_button(void)
+{
+    lv_obj_t *screen = lv_screen_active();
+    lv_obj_t *btn = lv_button_create(screen);
+    lv_obj_set_size(btn, 70, 40);
+    lv_obj_align(btn, LV_ALIGN_BOTTOM_LEFT, 30, -50);
+
+    lv_obj_t *label = lv_label_create(btn);
+    lv_label_set_text(label, "ZERO");
+    lv_obj_center(label);
+    lv_obj_add_event_cb(btn, zero_btn_event_cb, LV_EVENT_CLICKED, NULL);
+}
 
 esp_err_t lvgl_ui_init(void)
 {
@@ -62,6 +85,7 @@ esp_err_t lvgl_ui_init(void)
     lvgl_port_lock(0);
 
     ui_matrix_create();
+    create_zero_button();
 
     lvgl_port_unlock();
 
