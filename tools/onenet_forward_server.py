@@ -19,7 +19,7 @@ Useful environment variables:
   FORWARD_PORT                 default: 3000
   FORWARD_SHARED_TOKEN         optional token checked against query/header/body
   FORWARD_REQUIRE_POST_TOKEN   default: 0; set to 1 to require token on POST
-  FORWARD_ACTIVE_MIN_MS        default: 500; minimum interval for non-zero forwards
+  FORWARD_ACTIVE_MIN_MS        default: 200; minimum interval for non-zero forwards
   FORWARD_CLEAR_MIN_MS         default: 1000; minimum interval for clear forwards
   FORWARD_ACCEPT_PAST_MS       default: 5000; accept payloads this old at startup
   FORWARD_LOG_SKIPS            default: 0; set to 1 to log skipped duplicate/idle pushes
@@ -73,7 +73,7 @@ EXPECTED_SOURCE_ID = os.getenv("EXPECTED_SOURCE_ID", "device_A")
 ONENET_PRODUCT_ID = os.getenv("ONENET_PRODUCT_ID", "8x5w9DD3Av")
 SHARED_TOKEN = os.getenv("FORWARD_SHARED_TOKEN", "")
 REQUIRE_POST_TOKEN = os.getenv("FORWARD_REQUIRE_POST_TOKEN", "0") == "1"
-ACTIVE_FORWARD_MIN_MS = int(os.getenv("FORWARD_ACTIVE_MIN_MS", "500"))
+ACTIVE_FORWARD_MIN_MS = int(os.getenv("FORWARD_ACTIVE_MIN_MS", "200"))
 CLEAR_FORWARD_MIN_MS = int(os.getenv("FORWARD_CLEAR_MIN_MS", "1000"))
 ACCEPT_PAST_MS = int(os.getenv("FORWARD_ACCEPT_PAST_MS", "5000"))
 LOG_SKIPS = os.getenv("FORWARD_LOG_SKIPS", "0") == "1"

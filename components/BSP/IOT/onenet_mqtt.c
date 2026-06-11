@@ -203,16 +203,28 @@ static void onenet_property_handle(cJSON *property)
     int frame_id = parse_property_number(params, "frame_id");
     uint16_t matrix_data[MATRIX_POINTS];
     bool has_matrix_data = parse_matrix_data(params, matrix_data);
+    bool matrix_all_zero = has_matrix_data;
+    if (has_matrix_data) {
+        for (int i = 0; i < MATRIX_POINTS; i++) {
+            if (matrix_data[i] != 0) {
+                matrix_all_zero = false;
+                break;
+            }
+        }
+    }
+    bool clear_request = (value == 0) || matrix_all_zero;
 
-    if (frame_id >= 0) {
+    if (!clear_request && frame_id >= 0) {
         if (last_frame_id >= 0 && frame_id <= last_frame_id) {
             ESP_LOGW(TAG, "Ignore stale frame_id: current=%d last=%d", frame_id, last_frame_id);
             return;
         }
         last_frame_id = frame_id;
+    } else if (frame_id >= 0 && frame_id > last_frame_id) {
+        last_frame_id = frame_id;
     }
 
-    if (value == 0) {
+    if (clear_request) {
         ESP_LOGI(TAG, "Clear max data");
         matrix_is_active = 0;
         last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;

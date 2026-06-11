@@ -204,6 +204,7 @@ void ui_matrix_update_remote(uint16_t *cap)
         if (intensity == 0)
         {
             lv_obj_set_style_border_width(cells[i], 0, 0);
+            lv_obj_set_style_border_color(cells[i], lv_color_black(), 0);
             lv_obj_set_style_border_opa(cells[i], LV_OPA_TRANSP, 0);
             continue;
         }
@@ -225,6 +226,7 @@ void ui_matrix_clear_remote(void)
     for (int i = 0; i < TOTAL_POINTS; i++)
     {
         lv_obj_set_style_border_width(cells[i], 0, 0);
+        lv_obj_set_style_border_color(cells[i], lv_color_black(), 0);
         lv_obj_set_style_border_opa(cells[i], LV_OPA_TRANSP, 0);
     }
 

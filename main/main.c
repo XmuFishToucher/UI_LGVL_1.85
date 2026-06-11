@@ -170,6 +170,7 @@ void matrix_update_from_mqtt(uint8_t ch, uint16_t val)
         return;
     }
 
+    memset(remote_matrix_data, 0, sizeof(remote_matrix_data));
     remote_matrix_data[ch] = val;
     if (lvgl_port_lock(20)) {
         ui_matrix_update_remote(remote_matrix_data);
@@ -182,6 +183,19 @@ void matrix_update_all_from_mqtt(const uint16_t *data)
     if (!data) return;
 
     memcpy(remote_matrix_data, data, sizeof(remote_matrix_data));
+    bool has_active = false;
+    for (int i = 0; i < TOTAL_POINTS; i++) {
+        if (remote_matrix_data[i] != 0) {
+            has_active = true;
+            break;
+        }
+    }
+
+    if (!has_active) {
+        matrix_clear_from_mqtt();
+        return;
+    }
+
     if (lvgl_port_lock(20)) {
         ui_matrix_update_remote(remote_matrix_data);
         lvgl_port_unlock();
