@@ -19,7 +19,7 @@ Useful environment variables:
   FORWARD_PORT                 default: 3000
   FORWARD_SHARED_TOKEN         optional token checked against query/header/body
   FORWARD_REQUIRE_POST_TOKEN   default: 0; set to 1 to require token on POST
-  FORWARD_ACTIVE_MIN_MS        default: 100; minimum interval for non-zero forwards
+  FORWARD_ACTIVE_MIN_MS        default: 500; minimum interval for non-zero forwards
   FORWARD_CLEAR_MIN_MS         default: 1000; minimum interval for clear forwards
   FORWARD_ACCEPT_PAST_MS       default: 5000; accept payloads this old at startup
   FORWARD_LOG_SKIPS            default: 0; set to 1 to log skipped duplicate/idle pushes
@@ -73,7 +73,7 @@ EXPECTED_SOURCE_ID = os.getenv("EXPECTED_SOURCE_ID", "device_A")
 ONENET_PRODUCT_ID = os.getenv("ONENET_PRODUCT_ID", "8x5w9DD3Av")
 SHARED_TOKEN = os.getenv("FORWARD_SHARED_TOKEN", "")
 REQUIRE_POST_TOKEN = os.getenv("FORWARD_REQUIRE_POST_TOKEN", "0") == "1"
-ACTIVE_FORWARD_MIN_MS = int(os.getenv("FORWARD_ACTIVE_MIN_MS", "100"))
+ACTIVE_FORWARD_MIN_MS = int(os.getenv("FORWARD_ACTIVE_MIN_MS", "500"))
 CLEAR_FORWARD_MIN_MS = int(os.getenv("FORWARD_CLEAR_MIN_MS", "1000"))
 ACCEPT_PAST_MS = int(os.getenv("FORWARD_ACCEPT_PAST_MS", "5000"))
 LOG_SKIPS = os.getenv("FORWARD_LOG_SKIPS", "0") == "1"
@@ -84,6 +84,7 @@ START_TIME_MS = int(time.time() * 1000)
 last_forward_key: tuple[str, int, int] | None = None
 last_forward_ms = 0
 last_payload_time = 0
+last_frame_id = -1
 forward_signal_active = False
 forward_lock = threading.Lock()
 
@@ -261,8 +262,14 @@ def render_body(
     return json.dumps(data, separators=(",", ":")).encode("utf-8")
 
 
-def should_forward(source_id: str, max_tx_idx: int, max_tx_value: int, payload_time: int) -> bool:
-    global last_forward_key, last_forward_ms, last_payload_time, forward_signal_active
+def should_forward(
+    source_id: str,
+    max_tx_idx: int,
+    max_tx_value: int,
+    payload_time: int,
+    frame_id: int | None = None,
+) -> bool:
+    global last_forward_key, last_forward_ms, last_payload_time, last_frame_id, forward_signal_active
 
     now_ms = int(time.monotonic() * 1000)
     key = (source_id, max_tx_idx, max_tx_value)
@@ -273,6 +280,9 @@ def should_forward(source_id: str, max_tx_idx: int, max_tx_value: int, payload_t
             return False
 
         if payload_time and last_payload_time and payload_time <= last_payload_time:
+            return False
+
+        if frame_id is not None and frame_id <= last_frame_id:
             return False
 
         if max_tx_value == 0 and not forward_signal_active:
@@ -288,6 +298,8 @@ def should_forward(source_id: str, max_tx_idx: int, max_tx_value: int, payload_t
         last_forward_ms = now_ms
         if payload_time:
             last_payload_time = payload_time
+        if frame_id is not None:
+            last_frame_id = frame_id
         forward_signal_active = max_tx_value != 0
         return True
 
@@ -389,9 +401,9 @@ class ForwardHandler(BaseHTTPRequestHandler):
                 self.send_json(200, {"ok": True, "ignored": f"source_id={source_id}"})
                 return
 
-            if not should_forward(source_id, max_tx_idx, max_tx_value, payload_time):
+            if not should_forward(source_id, max_tx_idx, max_tx_value, payload_time, frame_id):
                 if LOG_SKIPS:
-                    log(f"skip payload: source_id={source_id} max_tx_idx={max_tx_idx} max_tx_value={max_tx_value} time={payload_time}")
+                    log(f"skip payload: source_id={source_id} max_tx_idx={max_tx_idx} max_tx_value={max_tx_value} frame_id={frame_id} time={payload_time}")
                 self.send_json(200, {"ok": True, "skipped": "throttled duplicate"})
                 return
 

@@ -1,4 +1,5 @@
 #include "lvgl_ui.h"
+#include <stdbool.h>
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_lvgl_port.h"
@@ -13,6 +14,7 @@ static lv_display_t *lvgl_disp = NULL;
 static lv_indev_t *lvgl_touch_indev = NULL;
 
 extern void app_zero_calibrate(void);
+extern void app_stim_set_enabled(bool enabled);
 
 static void zero_btn_event_cb(lv_event_t *e)
 {
@@ -32,6 +34,27 @@ static void create_zero_button(void)
     lv_label_set_text(label, "ZERO");
     lv_obj_center(label);
     lv_obj_add_event_cb(btn, zero_btn_event_cb, LV_EVENT_CLICKED, NULL);
+}
+
+static void stim_switch_event_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
+        lv_obj_t *sw = lv_event_get_target(e);
+        app_stim_set_enabled(lv_obj_has_state(sw, LV_STATE_CHECKED));
+    }
+}
+
+static void create_stim_switch(void)
+{
+    lv_obj_t *screen = lv_screen_active();
+    lv_obj_t *label = lv_label_create(screen);
+    lv_label_set_text(label, "STIM");
+    lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 45, -128);
+
+    lv_obj_t *sw = lv_switch_create(screen);
+    lv_obj_set_size(sw, 56, 30);
+    lv_obj_align(sw, LV_ALIGN_BOTTOM_LEFT, 37, -95);
+    lv_obj_add_event_cb(sw, stim_switch_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
 esp_err_t lvgl_ui_init(void)
@@ -86,6 +109,7 @@ esp_err_t lvgl_ui_init(void)
 
     ui_matrix_create();
     create_zero_button();
+    create_stim_switch();
 
     lvgl_port_unlock();
 

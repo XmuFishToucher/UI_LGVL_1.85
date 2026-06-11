@@ -1,6 +1,7 @@
 #ifndef __ONENET_MQTT_H__
 #define __ONENET_MQTT_H__
 #include "esp_err.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 //产品ID、设备名称、设备密钥
@@ -13,6 +14,7 @@
 void matrix_update_from_mqtt(uint8_t ch, uint16_t val);
 void matrix_update_all_from_mqtt(const uint16_t *data);
 void matrix_clear_from_mqtt(void);
+bool app_stim_is_enabled(void);
 
 // 传感器最大值结构体
 typedef struct {

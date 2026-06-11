@@ -29,6 +29,40 @@ static const char *TAG = "MAIN";
 static uint16_t local_matrix_data[TOTAL_POINTS];
 static uint16_t local_matrix_raw[TOTAL_POINTS];
 static uint16_t remote_matrix_data[TOTAL_POINTS];
+static uint8_t local_uart_rx_buf[128];
+static uint8_t local_uart_parse_buf[UART_PARSE_BUF_SIZE];
+static uint16_t local_uart_parsed[TOTAL_POINTS];
+static volatile bool stim_enabled = false;
+
+static void send_stim_zero_frame(void)
+{
+    uint8_t tx_buf[MATRIX_FRAME_LEN] = {0};
+
+    tx_buf[0] = MATRIX_FRAME_HEADER_0;
+    tx_buf[1] = MATRIX_FRAME_HEADER_1;
+    tx_buf[MATRIX_FRAME_LEN - 2] = 0x0D;
+    tx_buf[MATRIX_FRAME_LEN - 1] = 0x0A;
+
+    int written = uart_send_data(tx_buf, sizeof(tx_buf));
+    if (written != (int)sizeof(tx_buf)) {
+        ESP_LOGW(TAG, "Stim zero frame incomplete: written=%d expected=%d", written, (int)sizeof(tx_buf));
+    }
+}
+
+bool app_stim_is_enabled(void)
+{
+    return stim_enabled;
+}
+
+void app_stim_set_enabled(bool enabled)
+{
+    stim_enabled = enabled;
+    ESP_LOGI(TAG, "Stim %s", enabled ? "enabled" : "disabled");
+
+    if (!enabled) {
+        send_stim_zero_frame();
+    }
+}
 
 static bool parse_matrix_frame(const uint8_t *frame, uint16_t *out)
 {
@@ -84,33 +118,30 @@ void app_zero_calibrate(void)
 
 static void local_uart_rx_task(void *arg)
 {
-    uint8_t rx_buf[128];
-    uint8_t parse_buf[UART_PARSE_BUF_SIZE];
     size_t used = 0;
-    uint16_t parsed[TOTAL_POINTS];
 
     while (1) {
-        int len = uart_recv_data(rx_buf, sizeof(rx_buf), 20);
+        int len = uart_recv_data(local_uart_rx_buf, sizeof(local_uart_rx_buf), 20);
         if (len <= 0) {
             continue;
         }
 
-        if (used + len > sizeof(parse_buf)) {
+        if (used + len > sizeof(local_uart_parse_buf)) {
             used = 0;
         }
 
-        memcpy(&parse_buf[used], rx_buf, len);
+        memcpy(&local_uart_parse_buf[used], local_uart_rx_buf, len);
         used += len;
 
         while (used >= 2) {
             size_t start = 0;
             while (start + 1 < used &&
-                   !(parse_buf[start] == MATRIX_FRAME_HEADER_0 && parse_buf[start + 1] == MATRIX_FRAME_HEADER_1)) {
+                   !(local_uart_parse_buf[start] == MATRIX_FRAME_HEADER_0 && local_uart_parse_buf[start + 1] == MATRIX_FRAME_HEADER_1)) {
                 start++;
             }
 
             if (start > 0) {
-                memmove(parse_buf, &parse_buf[start], used - start);
+                memmove(local_uart_parse_buf, &local_uart_parse_buf[start], used - start);
                 used -= start;
             }
 
@@ -118,12 +149,12 @@ static void local_uart_rx_task(void *arg)
                 break;
             }
 
-            if (parse_matrix_frame(parse_buf, parsed)) {
-                update_local_matrix_from_uart(parsed);
-                memmove(parse_buf, &parse_buf[MATRIX_FRAME_LEN], used - MATRIX_FRAME_LEN);
+            if (parse_matrix_frame(local_uart_parse_buf, local_uart_parsed)) {
+                update_local_matrix_from_uart(local_uart_parsed);
+                memmove(local_uart_parse_buf, &local_uart_parse_buf[MATRIX_FRAME_LEN], used - MATRIX_FRAME_LEN);
                 used -= MATRIX_FRAME_LEN;
             } else {
-                memmove(parse_buf, &parse_buf[1], used - 1);
+                memmove(local_uart_parse_buf, &local_uart_parse_buf[1], used - 1);
                 used--;
             }
         }
@@ -208,7 +239,8 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Initializing UART output...");
     uart_init_custom();
-    xTaskCreate(local_uart_rx_task, "local_uart_rx", 4096, NULL, 5, NULL);
+    app_stim_set_enabled(false);
+    xTaskCreate(local_uart_rx_task, "local_uart_rx", 8192, NULL, 5, NULL);
 
     wifi_ev = xEventGroupCreate();
     wifi_manager_init(wifi_state_cb);

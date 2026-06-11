@@ -224,10 +224,14 @@ static void onenet_property_handle(cJSON *property)
         last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         if (has_matrix_data) {
             matrix_update_all_from_mqtt(matrix_data);
-            uart_forward_matrix_data(matrix_data);
+            if (app_stim_is_enabled()) {
+                uart_forward_matrix_data(matrix_data);
+            }
         } else {
             matrix_update_from_mqtt((uint8_t)channel, (uint16_t)value);
-            uart_forward_max_data((uint8_t)channel, (uint16_t)value);
+            if (app_stim_is_enabled()) {
+                uart_forward_max_data((uint8_t)channel, (uint16_t)value);
+            }
         }
     } else {
         ESP_LOGW(TAG, "Ignore invalid max data: channel=%d value=%d", channel, value);

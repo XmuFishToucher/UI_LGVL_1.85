@@ -11,6 +11,7 @@
 static int sta_connect_cnt = 0;
 
 static bool is_sta_connected = false;
+static bool is_wifi_started = false;
 
 static p_wifi_state_cb wifi_callback = NULL;
 
@@ -79,8 +80,7 @@ void wifi_manager_init(p_wifi_state_cb f)
                                                         NULL));
 
     wifi_callback = f;
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
-    ESP_ERROR_CHECK(esp_wifi_start() );
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 }
 
 void wifi_manager_connect(const char* ssid, const char* password)
@@ -97,11 +97,20 @@ void wifi_manager_connect(const char* ssid, const char* password)
     esp_wifi_get_mode(&mode);
     if(mode != WIFI_MODE_STA)
     {
-        esp_wifi_stop();
-        esp_wifi_set_mode(WIFI_MODE_STA);
+        if (is_wifi_started) {
+            ESP_ERROR_CHECK(esp_wifi_stop());
+            is_wifi_started = false;
+        }
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 
     }
     sta_connect_cnt = 0;
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    esp_wifi_start();
+    if (!is_wifi_started) {
+        ESP_ERROR_CHECK(esp_wifi_start());
+        is_wifi_started = true;
+    } else {
+        ESP_ERROR_CHECK(esp_wifi_disconnect());
+        ESP_ERROR_CHECK(esp_wifi_connect());
+    }
 }
