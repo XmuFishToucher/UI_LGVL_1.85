@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "cJSON.h"
+#include "esp_timer.h"
 #include "uart.h"
 
 #define TAG "onenet_mqtt"
@@ -192,6 +193,8 @@ static void onenet_property_handle(cJSON *property)
         return;
     }
 
+    int64_t t_recv = esp_timer_get_time();
+
     ESP_LOGI(TAG, "Data from: %s", src_val->valuestring);
     if (strcmp(src_val->valuestring, ONENET_EXPECTED_SOURCE_ID) != 0) {
         ESP_LOGW(TAG, "Ignore property set from unexpected source: %s", src_val->valuestring);
@@ -230,6 +233,9 @@ static void onenet_property_handle(cJSON *property)
         last_signal_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         matrix_clear_from_mqtt();
         uart_forward_matrix_data(NULL);
+        int64_t t_done = esp_timer_get_time();
+        printf("[TIMING] frame_id=%d clear recv=%lld uart_done=%lld delta_us=%lld\r\n",
+               frame_id, t_recv, t_done, t_done - t_recv);
     } else if (channel >= 0 && channel < 47 && value > 0) {
         ESP_LOGI(TAG, "Apply max data: channel=%d value=%d", channel, value);
         matrix_is_active = 1;
@@ -238,11 +244,17 @@ static void onenet_property_handle(cJSON *property)
             matrix_update_all_from_mqtt(matrix_data);
             if (app_stim_is_enabled()) {
                 uart_forward_matrix_data(matrix_data);
+                int64_t t_done = esp_timer_get_time();
+                printf("[TIMING] frame_id=%d ch=%d val=%d recv=%lld uart_done=%lld delta_us=%lld\r\n",
+                       frame_id, channel, value, t_recv, t_done, t_done - t_recv);
             }
         } else {
             matrix_update_from_mqtt((uint8_t)channel, (uint16_t)value);
             if (app_stim_is_enabled()) {
                 uart_forward_max_data((uint8_t)channel, (uint16_t)value);
+                int64_t t_done = esp_timer_get_time();
+                printf("[TIMING] frame_id=%d ch=%d val=%d recv=%lld uart_done=%lld delta_us=%lld\r\n",
+                       frame_id, channel, value, t_recv, t_done, t_done - t_recv);
             }
         }
     } else {
