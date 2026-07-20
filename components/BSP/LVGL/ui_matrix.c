@@ -20,21 +20,21 @@ typedef struct {
 static const point_def_t points[TOTAL_POINTS] = {
 
     // ===== 小指 (ch 0, pin 48) =====
-    { 0,  6.5f, -1.0f},
+    { 0,  6.8f, -4.0f},
 
     // ===== 手掌第6列 (ch 1-6, pins 47-42, gx=5, gy=0..5 上→下) =====
     { 1,  5.0f, 0},  { 2,  5.0f, 1},  { 3,  5.0f, 2},
     { 4,  5.0f, 3},  { 5,  5.0f, 4},  { 6,  5.0f, 5},
 
     // ===== 无名指 (ch 7-9, pins 41-39, 指尖→指根) =====
-    { 7,  3.8f, -5.0f},  { 8,  3.8f, -3.0f},  { 9,  3.8f, -1.5f},
+    { 7,  4.3f, -6.4f},  { 8,  4.0f, -4.3f},  { 9,  3.7f, -2.5f},
 
     // ===== 手掌第5列 (ch 10-15, pins 38-33, gx=4, gy=0..5 上→下) =====
     {10,  4.0f, 0},  {11,  4.0f, 1},  {12,  4.0f, 2},
     {13,  4.0f, 3},  {14,  4.0f, 4},  {15,  4.0f, 5},
 
     // ===== 中指 (ch 16-18, pins 32-30, 指尖→指根) =====
-    {16,  2.0f, -6.0f},  {17,  2.0f, -3.5f},  {18,  2.0f, -1.5f},
+    {16,  2.2f, -7.5f},  {17,  2.0f, -5.0f},  {18,  2.0f, -3.1f},
 
     // ===== 手掌第4列 (ch 19-24, pins 29-24, gx=3, gy=0..5 上→下) =====
     {19,  3.0f, 0},  {20,  3.0f, 1},  {21,  3.0f, 2},
@@ -45,7 +45,7 @@ static const point_def_t points[TOTAL_POINTS] = {
     {28,  2.0f, 2},  {29,  2.0f, 1},  {30,  2.0f, 0},
 
     // ===== 食指 (ch 31-33, pins 17-15, 指尖→指根) =====
-    {31,  -1.2f, -5.0f},  {32,  -1.2f, -3.0f},  {33,  -1.2f, -1.5f},
+    {31,  -1.0f, -6.0f},  {32,  -0.7f, -4.3f},  {33,  -0.5f, -2.5f},
 
     // ===== 手掌第2列 (ch 34-39, pins 14-9, gx=1, gy=5..0 上→下) =====
     {34,  1.0f, 5},  {35,  1.0f, 4},  {36,  1.0f, 3},
@@ -56,10 +56,20 @@ static const point_def_t points[TOTAL_POINTS] = {
     {43,  0.0f, 2},  {44,  0.0f, 1},  {45,  0.0f, 0},
 
     // ===== 拇指 (ch 46, pin 2) =====
-    {46, -2.5f, 2.5f},
+    {46, -4.5f, 0.0f},
 };
 
 static lv_obj_t *cells[TOTAL_POINTS];
+
+#define PALM_Y_OFFSET (-0.5f)
+
+static int is_palm_point(uint8_t ch)
+{
+    return (ch >= 1 && ch <= 6) ||
+           (ch >= 10 && ch <= 15) ||
+           (ch >= 19 && ch <= 30) ||
+           (ch >= 34 && ch <= 45);
+}
 
 // ======================= 创建阵点UI =======================
 void ui_matrix_create(void)
@@ -94,8 +104,9 @@ void ui_matrix_create(void)
     {
         lv_obj_t *obj = lv_obj_create(screen);
 
+        float gy = points[i].gy + (is_palm_point(points[i].ch) ? PALM_Y_OFFSET : 0.0f);
         int pos_x = start_x + (int)((points[i].gx - min_gx) * cell_size);
-        int pos_y = start_y + (int)((points[i].gy - min_gy) * cell_size);
+        int pos_y = start_y + (int)((gy - min_gy) * cell_size);
 
         lv_obj_set_size(obj, dot_diameter, dot_diameter);
         lv_obj_set_pos(obj, pos_x, pos_y);
