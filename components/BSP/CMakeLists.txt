@@ -32,4 +32,11 @@ set(requires
 
 idf_component_register(SRC_DIRS ${src_dirs} INCLUDE_DIRS ${include_dirs} REQUIRES ${requires})
 
+set(ONENET_DEVICE_NAME_OVERRIDE "" CACHE STRING
+    "Override the default OneNET device name for receiver firmware builds")
+if(ONENET_DEVICE_NAME_OVERRIDE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE
+        ONENET_DEVICE_NAME=\"${ONENET_DEVICE_NAME_OVERRIDE}\")
+endif()
+
 component_compile_options(-ffast-math -O3 -Wno-error=format -Wno-format)

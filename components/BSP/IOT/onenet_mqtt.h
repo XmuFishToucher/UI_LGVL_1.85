@@ -6,7 +6,9 @@
 //产品ID、设备名称、设备密钥
 #define ONENET_PRODUCT_ID "8x5w9DD3Av"
 #define ONENET_PRODUCT_ACCESS_KEY "UycLzekhG0HPmcMDzS03H/PB8QtHzRX9jdk/h4EdUxk="
-#define ONENET_DEVICE_NAME "device_B"
+#ifndef ONENET_DEVICE_NAME
+#define ONENET_DEVICE_NAME "device_B2"
+#endif
 #define ONENET_EXPECTED_SOURCE_ID "device_A"
 
 // 矩阵单点更新 (由 main.c 实现, MQTT 收到数据后调用)

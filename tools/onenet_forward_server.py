@@ -3,7 +3,10 @@
 Local HTTP forwarder for OneNET rule-engine pushes.
 
 Flow:
-  device_A -> OneNET rule engine -> this server -> OneNET property-set API -> device_B
+  device_A -> OneNET rule engine -> this server -> OneNET property-set API
+                                                    |-> device_B
+                                                    |-> device_B2
+                                                    `-> device_B3
 
 Start locally:
   python tools/onenet_forward_server.py
@@ -25,7 +28,8 @@ Useful environment variables:
   FORWARD_LOG_SKIPS            default: 0; set to 1 to log skipped duplicate/idle pushes
   FORWARD_LOG_REQUESTS         default: 0; set to 1 to log every HTTP request
   FORWARD_LOG_DISCONNECTS      default: 0; set to 1 to log client disconnects
-  TARGET_DEVICE_NAME           default: device_B
+  TARGET_DEVICE_NAMES          comma-separated targets; default: device_B,device_B2,device_B3
+  TARGET_DEVICE_NAME           legacy single-target fallback
   EXPECTED_SOURCE_ID           default: device_A
   ONENET_PRODUCT_ID            default: 8x5w9DD3Av
 
@@ -50,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -68,7 +73,14 @@ HOST = os.getenv("FORWARD_HOST", "127.0.0.1")
 PORT = int(os.getenv("FORWARD_PORT", "3000"))
 PATH = "/onenet/forward"
 
-TARGET_DEVICE_NAME = os.getenv("TARGET_DEVICE_NAME", "device_B")
+target_device_names_raw = os.getenv("TARGET_DEVICE_NAMES")
+if not target_device_names_raw:
+    target_device_names_raw = os.getenv("TARGET_DEVICE_NAME", "device_B,device_B2,device_B3")
+TARGET_DEVICE_NAMES = tuple(
+    dict.fromkeys(name.strip() for name in target_device_names_raw.split(",") if name.strip())
+)
+if not TARGET_DEVICE_NAMES:
+    raise ValueError("TARGET_DEVICE_NAMES must contain at least one device name")
 EXPECTED_SOURCE_ID = os.getenv("EXPECTED_SOURCE_ID", "device_A")
 ONENET_PRODUCT_ID = os.getenv("ONENET_PRODUCT_ID", "8x5w9DD3Av")
 SHARED_TOKEN = os.getenv("FORWARD_SHARED_TOKEN", "")
@@ -224,6 +236,7 @@ def normalize_matrix_data(value: Any) -> list[int] | None:
 
 
 def render_body(
+    target_device: str,
     source_id: str,
     max_tx_idx: int,
     max_tx_value: int,
@@ -235,7 +248,7 @@ def render_body(
         .replace("{source_id}", source_id)
         .replace("{max_tx_idx}", str(max_tx_idx))
         .replace("{max_tx_value}", str(max_tx_value))
-        .replace("{target_device}", TARGET_DEVICE_NAME)
+        .replace("{target_device}", target_device)
         .replace("{product_id}", ONENET_PRODUCT_ID)
     )
     data = json.loads(body)
@@ -275,14 +288,17 @@ def should_forward(source_id: str, max_tx_idx: int, max_tx_value: int, payload_t
         if payload_time and last_payload_time and payload_time <= last_payload_time:
             return False
 
-        if max_tx_value == 0 and not forward_signal_active:
-            return False
+        if max_tx_value == 0:
+            # device_A only emits one clear frame. Forward it immediately instead
+            # of allowing the active-frame throttle to discard it.
+            if not forward_signal_active:
+                return False
+        else:
+            if forward_signal_active and now_ms - last_forward_ms < min_interval:
+                return False
 
-        if forward_signal_active and now_ms - last_forward_ms < min_interval:
-            return False
-
-        if last_forward_key == key and now_ms - last_forward_ms < min_interval:
-            return False
+            if last_forward_key == key and now_ms - last_forward_ms < min_interval:
+                return False
 
         last_forward_key = key
         last_forward_ms = now_ms
@@ -293,16 +309,17 @@ def should_forward(source_id: str, max_tx_idx: int, max_tx_value: int, payload_t
 
 
 def call_onenet(
+    target_device: str,
     source_id: str,
     max_tx_idx: int,
     max_tx_value: int,
     frame_id: int | None = None,
     matrix_data: list[int] | None = None,
 ) -> tuple[int, str]:
-    body = render_body(source_id, max_tx_idx, max_tx_value, frame_id, matrix_data)
+    body = render_body(target_device, source_id, max_tx_idx, max_tx_value, frame_id, matrix_data)
 
     if not ONENET_SET_PROPERTY_URL:
-        log(f"DRY-RUN set {TARGET_DEVICE_NAME}: {body.decode('utf-8')}")
+        log(f"DRY-RUN set {target_device}: {body.decode('utf-8')}")
         return 200, "dry-run"
 
     headers = {"Content-Type": "application/json"}
@@ -318,12 +335,104 @@ def call_onenet(
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             text = resp.read().decode("utf-8", errors="replace")
-            log(f"OneNET set response status={resp.status} body={text}")
+            log(f"OneNET set {target_device} response status={resp.status} body={text}")
             return resp.status, text
     except urllib.error.HTTPError as exc:
         text = exc.read().decode("utf-8", errors="replace")
-        log(f"OneNET set HTTPError status={exc.code} body={text}")
+        log(f"OneNET set {target_device} HTTPError status={exc.code} body={text}")
         return exc.code, text
+
+
+def onenet_request_succeeded(status: int, response: str) -> bool:
+    """Check both the HTTP status and OneNET's JSON business status."""
+    if not 200 <= status < 300:
+        return False
+
+    try:
+        payload = json.loads(response)
+    except (json.JSONDecodeError, TypeError):
+        # Dry-run and non-JSON 2xx responses are considered successful.
+        return True
+
+    if not isinstance(payload, dict):
+        return True
+
+    code = payload.get("code")
+    if code is not None and code not in (0, 200, "0", "200"):
+        return False
+
+    data = payload.get("data")
+    if isinstance(data, dict):
+        data_code = data.get("code")
+        if data_code is not None and data_code not in (0, 200, "0", "200"):
+            return False
+
+    return True
+
+
+def call_onenet_targets(
+    source_id: str,
+    max_tx_idx: int,
+    max_tx_value: int,
+    frame_id: int | None = None,
+    matrix_data: list[int] | None = None,
+) -> dict[str, tuple[int, str]]:
+    results: dict[str, tuple[int, str]] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(TARGET_DEVICE_NAMES)) as executor:
+        futures = {
+            executor.submit(
+                call_onenet,
+                target_device,
+                source_id,
+                max_tx_idx,
+                max_tx_value,
+                frame_id,
+                matrix_data,
+            ): target_device
+            for target_device in TARGET_DEVICE_NAMES
+        }
+        for future in concurrent.futures.as_completed(futures):
+            target_device = futures[future]
+            try:
+                results[target_device] = future.result()
+            except Exception as exc:  # noqa: BLE001 - preserve other target deliveries.
+                log(f"OneNET set {target_device} failed: {exc}")
+                results[target_device] = (599, str(exc))
+    return results
+
+
+def summarize_target_results(
+    results: dict[str, tuple[int, str]],
+) -> tuple[int, dict[str, Any]]:
+    target_results = {
+        target_device: {
+            "ok": onenet_request_succeeded(status, response),
+            "status": status,
+            "response": response,
+        }
+        for target_device, (status, response) in results.items()
+    }
+    successful_targets = [name for name, result in target_results.items() if result["ok"]]
+    failed_targets = [name for name, result in target_results.items() if not result["ok"]]
+    any_success = bool(successful_targets)
+    all_success = not failed_targets
+
+    if any_success and not all_success:
+        log(
+            "partial delivery: "
+            f"successful={successful_targets} failed={failed_targets}"
+        )
+
+    response_body = {
+        "ok": any_success,
+        "partial": any_success and not all_success,
+        "successful_targets": successful_targets,
+        "failed_targets": failed_targets,
+        "targets": target_results,
+    }
+    # A failed target must not make OneNET retry deliveries that already
+    # reached online devices. Only ask for a retry when every target failed.
+    return (200 if any_success else 502), response_body
 
 
 class ForwardHandler(BaseHTTPRequestHandler):
@@ -396,9 +505,9 @@ class ForwardHandler(BaseHTTPRequestHandler):
                 return
 
             log(f"push payload: {json.dumps(payload, ensure_ascii=False)}")
-            status, response = call_onenet(source_id, max_tx_idx, max_tx_value, frame_id, matrix_data)
-            ok = 200 <= status < 300
-            self.send_json(status if ok else 502, {"ok": ok, "onenet_status": status, "response": response})
+            results = call_onenet_targets(source_id, max_tx_idx, max_tx_value, frame_id, matrix_data)
+            response_status, response_body = summarize_target_results(results)
+            self.send_json(response_status, response_body)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, socket.timeout) as exc:
             if LOG_DISCONNECTS:
                 log(f"client disconnected before response was sent: {exc}")
